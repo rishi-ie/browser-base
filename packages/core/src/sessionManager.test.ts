@@ -1,38 +1,40 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionManager } from './sessionManager.js';
-import type { Config } from './config.js';
+import { resolveConfig } from './config.js';
+import * as path from 'path';
+import * as os from 'os';
 
 // Mock chrome-launcher
 vi.mock('chrome-launcher', () => ({
-  launch: vi.fn().mockResolvedValue({ pid: 12345, port: 9222, kill: vi.fn() }),
+  launch: vi.fn().mockResolvedValue({
+    pid: 12345,
+    port: 9222,
+    kill: vi.fn(),
+    process: { pid: 12345 },
+  }),
   getChromePath: vi.fn().mockReturnValue('/usr/bin/google-chrome'),
 }));
 
 // Mock @browserbasehq/stagehand
 vi.mock('@browserbasehq/stagehand', () => ({
-  Stagehand: vi.fn().mockImplementation(() => ({
+  V3: vi.fn().mockImplementation(() => ({
     init: vi.fn().mockResolvedValue(undefined),
-    act: vi.fn().mockResolvedValue({ success: true }),
+    act: vi.fn().mockResolvedValue({ success: true, message: 'done', actionDescription: 'test', actions: [] }),
     observe: vi.fn().mockResolvedValue([]),
-    extract: vi.fn().mockResolvedValue({}),
-    context: { pages: vi.fn().mockResolvedValue([{ goto: vi.fn() }]) },
+    extract: vi.fn().mockResolvedValue({ extraction: 'test' }),
+    context: { pages: () => [{ goto: vi.fn() }] },
     close: vi.fn().mockResolvedValue(undefined),
   })),
 }));
 
 describe('SessionManager', () => {
+  const testDir = path.join(os.tmpdir(), 'browser-base-sm-test');
   let sessionManager: SessionManager;
-  let mockConfig: Config;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockConfig = {
-      browserContextDir: '/tmp/test-contexts',
-      headless: true,
-      strict: true,
-      logLevel: 'info',
-    };
-    sessionManager = new SessionManager(mockConfig);
+    const config = resolveConfig({ contextDir: testDir });
+    sessionManager = new SessionManager(config);
   });
 
   describe('getAvailableContexts', () => {
@@ -42,50 +44,50 @@ describe('SessionManager', () => {
     });
   });
 
-  describe('getContextDir', () => {
-    it('constructs correct path for context', () => {
-      const path = sessionManager.getContextDir('my-context');
-      expect(path).toBe('/tmp/test-contexts/my-context');
-    });
-
-    it('handles context with special characters', () => {
-      const path = sessionManager.getContextDir('test_session-1');
-      expect(path).toBe('/tmp/test-contexts/test_session-1');
+  describe('isActive', () => {
+    it('returns false initially', () => {
+      expect(sessionManager.isActive()).toBe(false);
     });
   });
 
-  describe('config passed to Stagehand', () => {
-    it('creates session with correct config', async () => {
-      // This test verifies the structure without actually launching Chrome
-      const contexts = sessionManager.getAvailableContexts();
-      expect(contexts).toEqual([]);
+  describe('getCurrentContext', () => {
+    it('returns default context initially', () => {
+      expect(sessionManager.getCurrentContext()).toBe('default');
+    });
+  });
+
+  describe('getDebugUrl', () => {
+    it('returns Chrome DevTools URL', () => {
+      const url = sessionManager.getDebugUrl();
+      expect(url).toContain('chrome://inspect');
+      expect(url).toContain('9222');
     });
   });
 
   describe('error cases', () => {
-    it('getSession returns undefined for non-existent session', () => {
-      const session = sessionManager.getSession('non-existent');
-      expect(session).toBeUndefined();
+    it('navigate throws when session not running', async () => {
+      await expect(sessionManager.navigate('https://example.com'))
+        .rejects.toThrow('No browser session running');
     });
 
-    it('navigate throws when session not found', async () => {
-      await expect(sessionManager.navigate('default', 'https://example.com'))
-        .rejects.toThrow('No session found for context "default"');
+    it('act throws when session not running', async () => {
+      await expect(sessionManager.act('click'))
+        .rejects.toThrow('No browser session running');
     });
 
-    it('act throws when session not found', async () => {
-      await expect(sessionManager.act('default', 'click'))
-        .rejects.toThrow('No session found for context "default"');
+    it('observe throws when session not running', async () => {
+      await expect(sessionManager.observe('find button'))
+        .rejects.toThrow('No browser session running');
     });
 
-    it('observe throws when session not found', async () => {
-      await expect(sessionManager.observe('default', 'find button'))
-        .rejects.toThrow('No session found for context "default"');
+    it('extract throws when session not running', async () => {
+      await expect(sessionManager.extract('get title'))
+        .rejects.toThrow('No browser session running');
     });
 
-    it('extract throws when session not found', async () => {
-      await expect(sessionManager.extract('default', 'get title'))
-        .rejects.toThrow('No session found for context "default"');
+    it('useContext throws when context does not exist', async () => {
+      await expect(sessionManager.useContext('nonexistent'))
+        .rejects.toThrow("Context 'nonexistent' not found");
     });
   });
 });
