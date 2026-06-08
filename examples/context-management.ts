@@ -145,15 +145,14 @@ async function main() {
   // to act as a different identity (e.g. work account vs personal
   // account) without restarting the program.
   //
-  // Note: `useContext` returns void; if you need the new SessionInfo
-  // (debug/CDP URLs, etc.) call `browser.start(name)` instead, which
-  // returns the info and is idempotent when a session is already
-  // running.
+  // `useContext` returns the new `SessionInfo` (debug/CDP URLs, etc.),
+  // so you don't need a separate `start` call afterwards.
   // -------------------------------------------------------------------------
   console.log('5. Switching to "gmail-personal" via useContext...');
-  await browser.useContext('gmail-personal');
+  const switched = await browser.useContext('gmail-personal');
   console.log(`  Active context: ${browser.getCurrentContext()}`);
   console.log(`  Debug URL:      ${browser.getDebugUrl()}`);
+  console.log(`  New session:    ${switched.sessionId}`);
   console.log('');
 
   // -------------------------------------------------------------------------
