@@ -17,12 +17,11 @@ The LLM running in your pi agent uses `browser` to operate across the internet:
 ## One-command install (pi agent)
 
 ```bash
-pi install browserbase/browser-base
-```
+# Install from GitHub
+npm install github:browserbase/browser-base
 
-Or manually:
-```bash
-cp node_modules/@browserbase/local/pi-extension.ts ~/.pi/agent/extensions/browser-base.ts
+# Copy the pi extension to your extensions folder
+cp node_modules/browser-base/pi-extension.ts ~/.pi/agent/extensions/browser-base.ts
 ```
 
 Restart pi. The `browser` tool is now available to the LLM.
@@ -32,15 +31,21 @@ Restart pi. The `browser` tool is now available to the LLM.
 ## Give this to your agent
 
 ```
-I have browser-base installed. Use the browser tool to operate across the internet.
+Install browser-base from GitHub:
+  npm install github:browserbase/browser-base
+
+Then copy the pi extension:
+  cp node_modules/browser-base/pi-extension.ts ~/.pi/agent/extensions/browser-base.ts
+
+After restarting pi, use the browser tool to operate across the internet:
 
 browser navigate to <url>          # open a URL
 browser act "<instruction>"        # click/type using natural language
 browser observe "<description>"   # find clickable elements
 browser extract "<instruction>"   # get structured data
-browser start                     # start browser session
-browser end                       # close browser
-browser use-context <name>        # switch to a different context
+browser start                      # start browser session
+browser end                        # close browser
+browser use-context <name>         # switch to a different context
 browser status                    # show current state
 browser contexts                  # list available contexts
 
