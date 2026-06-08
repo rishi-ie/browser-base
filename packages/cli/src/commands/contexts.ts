@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { getAvailableContexts } from '@browserbase/local';
+import { getAvailableContexts } from '../core/index.js';
 
 export const contextsCommand = new Command('contexts')
   .description('List available browser contexts')

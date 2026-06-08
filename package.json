@@ -1,7 +1,7 @@
 {
   "name": "browser-base",
   "version": "0.1.0",
-  "private": true,
+  "description": "Self-hosted browser infrastructure for AI coding agents. Local Chrome with persistent login sessions.",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "build": "turbo build",
@@ -12,7 +12,6 @@
   "devDependencies": {
     "turbo": "^2.9.0",
     "typescript": "^5.7.0",
-    "@types/node": "^22.0.0",
-    "@browserbase/local": "workspace:*"
+    "@types/node": "^22.0.0"
   }
 }

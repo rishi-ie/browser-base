@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import * as fs from 'fs/promises';
-import { createBrowser, type Config } from '@browserbase/local';
+import { createBrowser, type Config } from '../core/index.js';
 import { loadProjectConfig, toResolvedConfig } from '../projectConfig.js';
 
 export const extractCommand = new Command('extract')
