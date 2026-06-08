@@ -3,15 +3,29 @@
   "version": "0.1.0",
   "description": "Self-hosted browser infrastructure for AI coding agents. Local Chrome with persistent login sessions.",
   "packageManager": "pnpm@9.15.0",
+  "bin": {
+    "browse-local": "./packages/cli/dist/program.js"
+  },
   "scripts": {
-    "build": "turbo build",
-    "dev": "turbo dev",
-    "test": "turbo test",
-    "lint": "turbo lint"
+    "build": "cd packages/cli && tsc",
+    "test": "cd packages/cli && vitest run",
+    "dev": "cd packages/cli && tsc --watch"
+  },
+  "dependencies": {
+    "@browserbasehq/stagehand": "^3.5.0",
+    "chrome-launcher": "^1.1.0",
+    "commander": "^14.0.0",
+    "dotenv": "^16.5.0",
+    "fs-extra": "^11.3.0",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "ws": "^8.21.0",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
-    "turbo": "^2.9.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
     "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "vitest": "^2.1.0"
   }
 }
