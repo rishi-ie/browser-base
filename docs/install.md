@@ -1,111 +1,133 @@
-# Installation Guide
+# Installation & setup
 
-How to install and configure browser-base for different coding agents.
+`browser-base` is a programmatic library plus a CLI. There is no Docker image and no hosted service — everything runs on your machine.
 
 ## Prerequisites
 
-- Node.js 18+ (for npm/npx usage)
-- Chrome or Chromium installed on your system
-- API key for your LLM provider (OpenAI, Anthropic, etc.)
+| Requirement | Why | Notes |
+|-------------|-----|-------|
+| **Node.js 22+** | The workspace is ESM with Node 22 type defs | `node --version` |
+| **Chrome or Chromium** | `chrome-launcher` auto-detects; you can also point at a specific binary | macOS: `/Applications/Google Chrome.app`. Linux: `google-chrome` or `chromium-browser`. |
+| **An LLM API key** | `act` / `observe` / `extract` are LLM-driven | Default is OpenAI. Anthropic works too via `BROWSER_BASE_MODEL=anthropic/...`. |
 
-## Quick Install (All Agents)
+`navigate` does not need an LLM key; only the LLM-driven tools do.
 
-The fastest way to get started is using npx:
+## Install the library
 
-```json
-{
-  "mcpServers": {
-    "browser-base": {
-      "command": "npx",
-      "args": ["@browserbase/local-cli", "start", "--context-dir", "./browser-context"]
-    }
-  }
-}
+```bash
+npm install @browserbase/local
+# or
+pnpm add @browserbase/local
 ```
 
-Set your API key in the environment:
+This gives you the `Browser` class, `resolveConfig`, `createBrowser`, and the rest of the public API. Use it directly from your own scripts or agents.
+
+## Install the CLI
+
 ```bash
+npm install -g @browserbase/local-cli
+```
+
+The CLI is published as the `browse-local` binary. Verify:
+
+```bash
+browse-local --version
+browse-local --help
+```
+
+The CLI is a thin wrapper around the same `Browser` class. It exists for two reasons:
+
+1. To give agent runtimes (Claude Code, Pi, etc.) a single `browse-local start` command they can spawn.
+2. To manage contexts from the terminal (`browse-local context create ...`).
+
+## The user pipeline
+
+No matter how you intend to use browser-base, the flow is the same:
+
+1. **Install** the library and / or CLI.
+2. **Create a context** (`browse-local context create <name>`).
+3. **Manually log in** by opening Chrome against the new context dir.
+4. **Set your LLM API key** (only needed for `act` / `observe` / `extract`).
+5. **Drive the browser** from your script, agent, or CLI.
+
+```bash
+# 1. Install
+npm install -g @browserbase/local-cli
+
+# 2. Create a context
+browse-local context create github-main
+
+# 3. Open Chrome with the new profile and log in
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --user-data-dir="$(pwd)/browser-context/github-main"
+# ... log in to GitHub, complete 2FA, close Chrome ...
+
+# 4. Set the API key
 export OPENAI_API_KEY=sk-...
-# Or for Anthropic:
-export BROWSER_BASE_MODEL=anthropic/claude-sonnet-4-6
+
+# 5. Use it
 ```
 
----
+## Using it with an agent runtime
 
-## Claude Desktop (macOS / Linux)
+`browser-base` is a plain Node process — there is no MCP, no stdio protocol, no HTTP service. Agent runtimes are expected to embed the `Browser` class directly (or shell out to `browse-local start` if they need a long-lived MCP host).
 
-### Option 1: Auto-install with CLI
+### Pi Agent
 
-```bash
-npx @browserbase/local-cli install --agent claude-desktop
-```
-
-This automatically adds browser-base to your Claude Desktop configuration.
-
-### Option 2: Manual Configuration
-
-Find your Claude Desktop config file:
-
-**macOS:**
-```
-~/Library/Application Support/Claude/claude_desktop_config.json
-```
-
-**Linux:**
-```
-~/.config/Claude/claude_desktop_config.json
-```
-
-Add the MCP server entry:
+Pi loads MCP servers from `~/.pi/agent/mcp.json` (or a project-local equivalent). Add a `browser-base` entry that runs the CLI in long-lived mode:
 
 ```json
 {
   "mcpServers": {
     "browser-base": {
-      "command": "npx",
-      "args": ["@browserbase/local-cli", "start", "--context-dir", "./browser-context"],
+      "command": "browse-local",
+      "args": ["start", "--context-dir", "./browser-context"],
       "env": {
-        "OPENAI_API_KEY": "sk-your-key-here",
-        "BROWSER_BASE_DEFAULT_CONTEXT": "default",
-        "BROWSER_BASE_HEADFUL": "0"
+        "OPENAI_API_KEY": "sk-your-key-here"
       }
     }
   }
 }
 ```
 
-### Verify Installation
+`browse-local start` boots the `Browser` and blocks until SIGINT, so the process stays up for the lifetime of the agent session.
 
-1. Restart Claude Desktop
-2. Look for browser-base in the agent's available tools
-3. Test with a simple task: "Open Google and tell me the title"
+### Claude Code
 
----
+Claude Code supports MCP servers through `claude_desktop_config.json` (Claude Desktop) or its own settings. Add:
 
-## Cursor
+```json
+{
+  "mcpServers": {
+    "browser-base": {
+      "command": "browse-local",
+      "args": ["start", "--context-dir", "./browser-context"],
+      "env": {
+        "OPENAI_API_KEY": "sk-your-key-here"
+      }
+    }
+  }
+}
+```
 
-### Option 1: Auto-install with CLI
+Or use the auto-installer:
 
 ```bash
-npx @browserbase/local-cli install --agent cursor
+browse-local install --agent claude-desktop
 ```
 
-### Option 2: Manual Configuration
+This writes the same config to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/Claude/claude_desktop_config.json` (Linux). Restart Claude Desktop afterwards.
 
-Open your Cursor MCP settings file:
+### Cursor
 
-```
-~/.cursor/mcp.json
-```
-
-Add the browser-base entry:
+Add to `~/.cursor/mcp.json`:
 
 ```json
 [
   {
     "mcpServer": {
-      "command": "npx",
-      "args": ["@browserbase/local-cli", "start", "--context-dir", "./browser-context"],
+      "command": "browse-local",
+      "args": ["start", "--context-dir", "./browser-context"],
       "env": {
         "OPENAI_API_KEY": "sk-your-key-here"
       }
@@ -114,34 +136,22 @@ Add the browser-base entry:
 ]
 ```
 
-If you already have other MCP servers configured, append this entry to the array.
-
-### Verify Installation
-
-1. Restart Cursor
-2. Open Command Palette (Cmd/Ctrl + Shift + P)
-3. Search for "MCP" and check that browser-base is listed
-
----
-
-## VS Code
-
-### Option 1: Auto-install with CLI
+Or auto-install:
 
 ```bash
-npx @browserbase/local-cli install --agent vscode
+browse-local install --agent cursor
 ```
 
-### Option 2: Manual Configuration
+### VS Code
 
-VS Code uses the MCP extension. Add to your settings:
+VS Code needs the [MCP extension](https://marketplace.visualstudio.com/items?itemName=modelcontextprotocol.modelcontextprotocol). Add to your VS Code MCP settings (or `.vscode/settings.json`):
 
 ```json
 {
   "mcpServers": {
     "browser-base": {
-      "command": "npx",
-      "args": ["@browserbase/local-cli", "start", "--context-dir", "./browser-context"],
+      "command": "browse-local",
+      "args": ["start", "--context-dir", "./browser-context"],
       "env": {
         "OPENAI_API_KEY": "sk-your-key-here"
       }
@@ -150,214 +160,147 @@ VS Code uses the MCP extension. Add to your settings:
 }
 ```
 
-### Install the MCP Extension
+Or auto-install:
 
-1. Open VS Code
-2. Go to Extensions (Cmd/Ctrl + Shift + X)
-3. Search for "Model Context Protocol"
-4. Install the official MCP extension
+```bash
+browse-local install --agent vscode
+```
 
----
+### Generic agents (any MCP host)
 
-## Generic MCP Hosts
-
-For any MCP-compatible client, add this configuration:
+For any host that can spawn a process and talk MCP, point it at `browse-local start`:
 
 ```json
 {
   "mcpServers": {
     "browser-base": {
-      "command": "npx",
-      "args": ["@browserbase/local-cli", "start", "--context-dir", "./browser-context"],
+      "command": "browse-local",
+      "args": ["start", "--context-dir", "./browser-context"],
       "env": {
-        "OPENAI_API_KEY": "your-api-key"
+        "OPENAI_API_KEY": "sk-your-key-here"
       }
     }
   }
 }
 ```
 
-### Configuration File Locations
+### Embedding the library directly (no MCP)
 
-| Host | Config File |
-|------|-------------|
-| Claude Desktop (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| Claude Desktop (Linux) | `~/.config/Claude/claude_desktop_config.json` |
-| Cursor | `~/.cursor/mcp.json` |
-| VS Code | `.vscode/settings.json` or MCP extension settings |
+You can skip the CLI entirely and use the `Browser` class from your own code:
 
----
+```typescript
+import { Browser, resolveConfig } from '@browserbase/local';
 
-## Docker Usage
-
-### Pull the Image
-
-```bash
-docker pull browserbase/local:latest
+const browser = new Browser(resolveConfig({ contextDir: './browser-context' }));
+await browser.start('github-main');
+await browser.navigate('https://github.com');
+await browser.act('click the notifications bell');
+await browser.end();
 ```
 
-### Run the Container
+This is the recommended path for new integrations: the `Browser` class is a plain async API and is much easier to test and reason about than an MCP transport.
 
-```bash
-docker run -p 3000:3000 \
-  -e OPENAI_API_KEY=sk-your-key \
-  -v $(pwd)/browser-context:/app/browser-context \
-  browserbase/local:latest
-```
+## Environment variables
 
-### Use HTTP Transport
+Configuration precedence: **CLI flags > env vars > built-in defaults**.
 
-When using Docker, you'll likely want HTTP transport instead of stdio:
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | API key for the default model | — |
+| `ANTHROPIC_API_KEY` | API key for Anthropic models | — |
+| `BROWSER_BASE_MODEL` | LLM model string (`openai/gpt-4.1-mini`, `anthropic/claude-sonnet-4-6`, etc.) | `openai/gpt-4.1-mini` |
+| `BROWSER_BASE_CONTEXT_DIR` | Directory holding browser contexts | `./browser-context` |
+| `BROWSER_BASE_DEFAULT_CONTEXT` | Default context name | `default` |
+| `BROWSER_BASE_HEADFUL` | Set to `1` to show the browser | `0` (headless) |
+| `BROWSER_BASE_VERBOSE` | Pino log verbosity (`0`, `1`, `2`) | `0` |
+| `BROWSER_BASE_BROWSER_PATH` | Path to Chrome binary | auto-detect |
 
-```bash
-docker run -p 3000:3000 \
-  -e OPENAI_API_KEY=sk-your-key \
-  -e BROWSER_BASE_PORT=3000 \
-  -v $(pwd)/browser-context:/app/browser-context \
-  browserbase/local:latest start --port 3000
-```
+`browse-local start` also runs `dotenv.config()` before `resolveConfig`, so a `.env` in your CWD is loaded automatically. See [examples/.env.example](../examples/.env.example) for a full template.
 
-Then connect your MCP client to `http://localhost:3000/mcp`.
-
----
-
-## NPM Global Install
-
-Install browser-base globally for CLI access:
-
-```bash
-npm install -g @browserbase/local-cli
-```
-
-Then use the `browse-local` command:
-
-```bash
-# Start the MCP server
-browse-local start
-
-# List available contexts
-browse-local contexts
-
-# Create a new context
-browse-local context create github-logged-in
-
-# Install into agents
-browse-local install --agent claude-desktop
-```
-
----
-
-## Configuration Options
-
-### Command Line Options
+## CLI flag reference
 
 ```bash
 browse-local start \
   --context-dir ./browser-context \
-  --default-context default \
+  --default-context github-main \
   --headful \
   --model openai/gpt-4.1-mini \
-  --verbose 1
+  --verbose 1 \
+  --chrome-port 9222 \
+  --browser-path /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome
 ```
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--context-dir <path>` | Directory for browser contexts | `./browser-context` |
-| `--default-context <name>` | Default context to use | `default` |
-| `--headful` | Show browser window | headless |
-| `--model <model>` | LLM model for act/observe/extract | `openai/gpt-4.1-mini` |
-| `--verbose <0|1|2>` | Logging verbosity | `1` |
-| `--port <port>` | HTTP transport port | stdio (none) |
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--context-dir <path>` | Directory holding browser contexts | `./browser-context` |
+| `--default-context <name>` | Context to start with | `default` |
+| `--headful` | Show the browser window | headless |
+| `--model <model>` | LLM model string | `openai/gpt-4.1-mini` |
+| `--verbose <0\|1\|2>` | Logging verbosity | `0` |
 | `--browser-path <path>` | Path to Chrome binary | auto-detect |
-
-### Environment Variables
-
-```bash
-# Browser configuration
-BROWSER_BASE_CONTEXT_DIR=./browser-context
-BROWSER_BASE_DEFAULT_CONTEXT=default
-BROWSER_BASE_HEADFUL=0
-BROWSER_BASE_BROWSER_PATH=/Applications/Chromium.app/Contents/MacOS/Chromium
-
-# LLM configuration
-OPENAI_API_KEY=sk-...              # OpenAI API key
-BROWSER_BASE_MODEL=openai/gpt-4.1-mini  # Model to use
-
-# Transport configuration
-BROWSER_BASE_PORT=3000             # HTTP port (omit for stdio)
-BROWSER_BASE_HOST=localhost
-
-# Logging
-BROWSER_BASE_VERBOSE=1
-```
-
----
+| `--chrome-port <port>` | Chrome remote debugging port | `9222` |
 
 ## Troubleshooting
 
-### Chrome Not Found
+### Chrome not found
 
-If browser-base can't find Chrome:
+`chrome-launcher` searches standard install locations. If it can't find Chrome:
 
-1. **macOS:** Chrome is usually at `/Applications/Google Chrome.app`
-2. **Linux:** Try `google-chrome` or `chromium-browser`
-3. **Windows:** Usually at `C:\Program Files\Google\Chrome\Application\chrome.exe`
+- **macOS**: usually `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+- **Linux**: `google-chrome`, `chromium`, or `chromium-browser`
+- **Windows**: `C:\Program Files\Google\Chrome\Application\chrome.exe`
 
-Specify the path explicitly:
-
-```bash
-browse-local start --browser-path /path/to/chrome
-```
-
-### Context Not Found
-
-In strict mode, contexts must exist before use:
+Point at it explicitly:
 
 ```bash
-# Create a context
-browse-local context create github-logged-in
-
-# Or disable strict mode
-BROWSER_BASE_STRICT=0 browse-local start
+browse-local start --browser-path "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 ```
 
-### API Key Not Set
+### Context not found
 
-The `act`, `observe`, and `extract` tools require an LLM API key:
+`browser.start('x')` throws if `x` doesn't exist on disk. Create it first:
 
 ```bash
-export OPENAI_API_KEY=sk-your-key
+browse-local context create x
 ```
 
-Or for Anthropic models:
+### "Profile is already in use"
+
+Chrome locks the user-data-dir while running. If you see this, another Chrome process has the same context open. Quit it (or run `browse-local end` / `kill` the lingering `chrome` process) and retry.
+
+### API key errors
+
+`act` / `observe` / `extract` need a working LLM key. Verify:
+
+```bash
+echo "$OPENAI_API_KEY"     # should not be empty
+```
+
+For Anthropic:
 
 ```bash
 export BROWSER_BASE_MODEL=anthropic/claude-sonnet-4-6
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### Port Already in Use
+### `act` keeps failing on the same element
 
-If port 3000 is busy:
+The LLM probably can't find the element. Call `observe(...)` first to see what's on the page, then rephrase the action:
 
-```bash
-browse-local start --port 8080
+```typescript
+const elements = await browser.observe('find the search field');
+console.log(elements);
+// then rephrase based on what you see
+await browser.act('click the input with placeholder "Search GitHub"');
 ```
 
-### Docker Networking Issues
+### `browse-local start` is running but nothing is happening
 
-If connecting from host to Docker container:
+The command is **meant to be long-lived**. It blocks on a `Promise` so the process stays alive for the agent runtime to talk to. To exercise the API, run a separate script that imports `@browserbase/local` and uses the `Browser` class — or use the install command to register the CLI as an MCP server with your agent of choice.
 
-```bash
-docker run -p 127.0.0.1:3000:3000 ...
-```
+## Next steps
 
-Only bind to localhost to avoid exposing the browser externally.
-
----
-
-## Next Steps
-
-- [Tools Reference](tools.md) - Learn all 7 MCP tools
-- [Context Management](contexts.md) - Set up persistent login sessions
-- [Examples](../examples/) - Runnable code examples
+- [docs/tools.md](tools.md) — `Browser` class reference
+- [docs/contexts.md](contexts.md) — context creation, pre-login, sharing
+- [docs/architecture.md](architecture.md) — how the pieces fit together
+- [examples/](../examples/) — runnable code
