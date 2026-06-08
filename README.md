@@ -4,40 +4,26 @@ A **pi agent plugin** that gives your LLM a local Chrome with persistent login s
 
 ---
 
-## What it does
-
-The LLM running in your pi agent uses `browser` to operate across the internet:
-- Browse websites, click buttons, fill forms
-- Log into sites once and stay logged in forever (via Chrome profiles)
-- Switch between contexts (different accounts, different sites)
-- Extract structured data from any page
-
----
-
-## One-command install (pi agent)
+## Install (for pi agent)
 
 ```bash
-# Install from GitHub
-npm install github:browserbase/browser-base
+# Clone into your extensions folder
+git clone https://github.com/browserbase/browser-base.git ~/.pi/agent/extensions/browser-base
 
-# Copy the pi extension to your extensions folder
-cp node_modules/browser-base/pi-extension.ts ~/.pi/agent/extensions/browser-base.ts
+# Restart pi
 ```
 
-Restart pi. The `browser` tool is now available to the LLM.
+That's it. The extension auto-loads. The LLM can now use the `browser` tool.
 
 ---
 
 ## Give this to your agent
 
 ```
-Install browser-base from GitHub:
-  npm install github:browserbase/browser-base
+Install browser-base:
+  git clone https://github.com/browserbase/browser-base.git ~/.pi/agent/extensions/browser-base
 
-Then copy the pi extension:
-  cp node_modules/browser-base/pi-extension.ts ~/.pi/agent/extensions/browser-base.ts
-
-After restarting pi, use the browser tool to operate across the internet:
+Restart pi. Then use the browser tool to operate across the internet:
 
 browser navigate to <url>          # open a URL
 browser act "<instruction>"        # click/type using natural language
@@ -63,18 +49,68 @@ Pre-login (do once manually):
 
 ---
 
-## Setup (one-time)
+## Example: Research competitor pricing
+
+**Task:** Research pricing for 3 SaaS competitors.
+
+**Flow:**
+
+```
+User: Research pricing for Linear, Notion, and Asana. Summarize in a table.
+
+Agent:
+  # Create contexts for each competitor
+  browse-local context create linear
+  browse-local context create notion
+  browse-local context create asana
+
+  # Pre-login to Linear (do once, then agent uses it)
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    --user-data-dir="$(pwd)/browser-context/linear"
+  # log in, close
+
+  # Now the agent can use them
+  browser use-context linear
+  browser navigate to https://linear.app/pricing
+  browser extract "get all pricing tiers, prices, and features"
+  # → Returns: { plans: [{ name: "Free", price: 0, ... }, { name: "Pro", price: 8, ... }] }
+
+  browser use-context notion
+  browser navigate to https://notion.so/pricing
+  browser extract "get all pricing tiers, prices, and features"
+
+  browser use-context asana
+  browser navigate to https://asana.com/pricing
+  browser extract "get all pricing tiers, prices, and features"
+
+  # Agent synthesizes:
+  | Product | Free | Pro | Enterprise |
+  |---------|------|-----|------------|
+  | Linear  | ✓    | $8/user/mo | Custom |
+  | Notion  | ✓    | $8/user/mo | $15/user/mo |
+  | Asana   | ✓    | $10.99/user/mo | Custom |
+```
+
+**Why this works:**
+- Each context is a separate Chrome profile (cookies/logins persist)
+- The agent doesn't need to re-login each session
+- Extract returns structured JSON, not messy HTML
+- Can handle any website, not just static pages
+
+---
+
+## Setup (one-time per context)
 
 ```bash
-# 1. Create a context
+# Create context
 browse-local context create default
 
-# 2. Pre-login (open Chrome against the context, log in, close)
+# Pre-login (open Chrome, log in, close)
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --user-data-dir="$(pwd)/browser-context/default"
 ```
 
-Done. The LLM will use this context and stay logged in.
+Now the agent uses this context and stays logged in forever.
 
 ---
 
@@ -86,21 +122,20 @@ browse-local context create github
 browse-local context create gmail
 browse-local context create twitter
 
-# Pre-login each one
+# Pre-login each one (do once)
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --user-data-dir="$(pwd)/browser-context/github"
 # log in, close
 
 # Agent switches between them
 browser use-context github
-browser use-context gmail
+browser navigate to github.com/user/repo
+browser act "click the Settings tab"
 ```
 
 ---
 
 ## Configuration
-
-The extension uses defaults. To customize:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -122,17 +157,23 @@ The extension uses defaults. To customize:
 ## How it works
 
 ```
+User prompt
+    │
+    ▼
 pi agent (LLM)
+    │
+    ├── "Research competitor pricing"
     │
     └── browser tool
             │
-            └── browser-base (pi extension)
+            └── browser-base extension
                     │
-                    ├── Browser class (@browserbase/local)
+                    ├── Browser class
                     │       │
                     │       └── SessionManager
                     │               │
                     │               ├── Stagehand V3 (env: LOCAL)
+                    │               │       └── LLM interprets page + actions
                     │               │
                     │               └── Chrome via CDP
                     │
@@ -140,12 +181,12 @@ pi agent (LLM)
                             └── cookies, logins, localStorage
 ```
 
-The LLM calls `browser` tool → browser-base executes via local Chrome → results returned to LLM.
+The LLM calls `browser` tool → browser-base drives Chrome → results returned to LLM.
 
 ---
 
 ## Files
 
-- `pi-extension.ts` — pi agent plugin (drop-in)
-- `packages/core/src/tools/` — Agent integration tools
+- `pi-extension.ts` — pi agent plugin
 - `packages/cli/` — `browse-local` CLI for context management
+- `docs/example.md` — More usage examples

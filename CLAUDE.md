@@ -16,15 +16,18 @@ Published as:
 ## Quick reference (for agents)
 
 ```
-browse-local act "<action>"           # click/type using natural language
-browse-local navigate "<url>"         # open a URL (no LLM needed)
-browse-local observe "[instruction]"  # list actionable elements on page
-browse-local extract "[instruction>"  # extract structured data from page
-browse-local use-context <name>       # switch context (restarts session)
-browse-local start                    # long-running (blocks until SIGINT)
-browse-local status                   # current config and session state
-browse-local contexts                 # list available contexts
-browse-local context create <name>    # create a new context dir
+# Install (pi agent)
+git clone https://github.com/browserbase/browser-base.git ~/.pi/agent/extensions/browser-base
+
+# Then restart pi
+
+# Context management CLI
+browse-local context create <name>   # create a context
+browse-local contexts                 # list contexts
+browse-local navigate "<url>"        # open URL (no LLM)
+browse-local act "<action>"           # click/type (LLM)
+browse-local observe "<instruction>"  # find elements
+browse-local extract "<instruction>"  # get structured data
 
 # Programmatic API
 import { Browser, resolveConfig } from '@browserbase/local';
@@ -153,14 +156,13 @@ Common flags: `--context <name>`, `--headful`, `--keep-alive`, `--model <model>`
 |---------|-------------|---------|
 | `BROWSER_BASE_CONTEXT_DIR` | Context directory | `./browser-context` |
 | `BROWSER_BASE_DEFAULT_CONTEXT` | Default context name | `default` |
-| `BROWSER_BASE_HEADFUL` | Show Chrome window | `0` |
-| `BROWSER_BASE_MODEL` | LLM model (`provider/model`) | `openai/gpt-4.1-mini` |
-| `BROWSER_BASE_VERBOSE` | Log verbosity | `0` |
+| `BROWSER_BASE_HEADFUL` | Show Chrome window | `false` |
 | `BROWSER_BASE_BROWSER_PATH` | Chrome binary path | auto-detect |
 | `BROWSER_BASE_CHROME_PORT` | CDP debugging port | `9222` |
-| `OPENAI_API_KEY` | Required for act/observe/extract | — |
 
 The CLI also supports a project-level config file at `.browser-base/browser-base.json` (resolved by `loadProjectConfig` in `projectConfig.ts`).
+
+**Note:** This is a pi agent plugin. The LLM (act/observe/extract) is handled by pi's configured model — no separate API key needed.
 
 ## Adding a new Browser method
 
