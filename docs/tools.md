@@ -1,624 +1,377 @@
-# MCP Tools Reference
+# Browser API reference
 
-Complete reference for all 7 MCP tools provided by browser-base.
+The `Browser` class is the entire public surface of `@browserbase/local`. Every method delegates to a `SessionManager` that owns the Chrome process and Stagehand client.
 
-## Overview
+```typescript
+import { Browser, resolveConfig } from '@browserbase/local';
 
-Browser-base exposes 7 tools via the MCP (Model Context Protocol) server. Each tool controls a specific aspect of browser automation using Stagehand under the hood.
+const browser = new Browser(resolveConfig({ contextDir: './browser-context' }));
+```
 
-## Tool Summary
-
-| Tool | Purpose |
-|------|---------|
-| `start` | Launch Chrome browser with a context |
-| `end` | Close browser session |
-| `use_context` | Switch to a different context |
-| `navigate` | Go to a URL |
-| `act` | Perform actions (click, type, etc.) |
-| `observe` | Find interactive elements |
-| `extract` | Pull structured data from page |
+All methods that touch the browser throw if no session is running. Start a session with `await browser.start(...)` first.
 
 ---
 
-## start
+## `start(context?)`
 
-Launch a Chrome browser session with the specified context.
-
-### Description
-
-Creates a new browser session using the Chrome profile directory for the given context. If the session already exists and is running, returns `already_running` status.
-
-### Input Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "context": {
-      "type": "string",
-      "description": "Context name (default: \"default\")"
-    }
-  }
-}
-```
+Launch Chrome with a context. Idempotent: calling `start` while a session is already running returns the existing `SessionInfo` without relaunching.
 
 ### Parameters
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `context` | string | No | Name of the browser context. Defaults to `"default"`. |
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `context` | `string` | No | Context name. Must be a directory under `contextDir`. Defaults to `config.defaultContext` (`"default"`). |
 
-### Output
+### Returns
 
-```json
-{
-  "session": "string",
-  "status": "started" | "already_running"
+`Promise<SessionInfo>`:
+
+```typescript
+interface SessionInfo {
+  sessionId: string;   // == context name
+  debugUrl: string;    // chrome://inspect#devtools/?ws=localhost:9222
+  cdpUrl: string;      // ws://localhost:9222
+  context: string;     // context name
 }
 ```
 
-### Examples
+### Throws
 
-**Start default session:**
-```json
-{
-  "name": "start",
-  "arguments": {}
-}
+- `Error("Context '<name>' not found. Available contexts: ...")` — strict mode is the default; the directory must pre-exist.
+- `Error("Invalid context name: '...'")` — empty, `.`, `..`, or contains `/` or `\`.
+- `Error("Timeout waiting for Chrome remote debugging port")` — Chrome launched but CDP never came up (30s).
+
+### Example
+
+```typescript
+// Use the configured default context
+await browser.start();
+
+// Use a specific context
+const info = await browser.start('github-main');
+console.log(info.debugUrl); // chrome://inspect#devtools/?ws=localhost:9222
 ```
-
-**Start with custom context:**
-```json
-{
-  "name": "start",
-  "arguments": {
-    "context": "github-logged-in"
-  }
-}
-```
-
-### Notes
-
-- In strict mode (default), the context must already exist on disk
-- The browser launches in headless mode by default
-- Set `BROWSER_BASE_HEADFUL=1` to see the browser window
 
 ---
 
-## end
+## `end()`
 
-Close an active browser session.
-
-### Description
-
-Closes the Chrome browser for the specified context. Idempotent - returns `not_running` if no session exists.
-
-### Input Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "context": {
-      "type": "string",
-      "description": "Context name (default: \"default\")"
-    }
-  }
-}
-```
+Close Chrome and tear down the Stagehand client. Idempotent — calling on an already-stopped browser is a no-op.
 
 ### Parameters
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `context` | string | No | Name of the browser context. Defaults to `"default"`. |
+None.
 
-### Output
+### Returns
 
-```json
-{
-  "session": "string",
-  "status": "closed" | "not_running"
-}
-```
+`Promise<void>`.
 
-### Examples
+### Example
 
-**End default session:**
-```json
-{
-  "name": "end",
-  "arguments": {}
-}
-```
-
-**End specific context:**
-```json
-{
-  "name": "end",
-  "arguments": {
-    "context": "github-logged-in"
-  }
-}
+```typescript
+await browser.start('github-main');
+// ...
+await browser.end();
 ```
 
 ---
 
-## use_context
+## `useContext(name)`
 
-Switch to a different browser context.
-
-### Description
-
-Ends any current session and starts a new one with the specified context. The new context must already exist on disk.
-
-### Input Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "context": {
-      "type": "string",
-      "description": "Context name to switch to"
-    }
-  },
-  "required": ["context"]
-}
-```
+Switch to a different context. Ends the current session (if any) and starts a new one with the named context. The new context must already exist on disk.
 
 ### Parameters
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `context` | string | Yes | Name of the context to switch to. Must exist on disk. |
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | `string` | Yes | Context to switch to. Must be a directory under `contextDir`. |
 
-### Output
+### Returns
 
-```json
-{
-  "context": "string",
-  "status": "switched"
-}
+`Promise<SessionInfo>` — same shape as `start`. (Internally this is `end()` + `start(name)`.)
+
+### Throws
+
+- `Error("Context '<name>' not found. Available contexts: ...")`
+- `Error("Invalid context name: '...'")`
+
+### Example
+
+```typescript
+await browser.start('github-main');
+await browser.navigate('https://github.com');
+// ... do stuff ...
+
+await browser.useContext('gmail');
+// previous Chrome process is gone; a new one is up with the gmail profile
+await browser.navigate('https://mail.google.com');
 ```
-
-### Examples
-
-**Switch to a logged-in context:**
-```json
-{
-  "name": "use_context",
-  "arguments": {
-    "context": "github-logged-in"
-  }
-}
-```
-
-### Error Cases
-
-- Context does not exist: Returns error with list of available contexts
-- Context switch fails: Returns error with details
 
 ---
 
-## navigate
+## `navigate(url)`
 
-Navigate to a URL in the browser.
-
-### Description
-
-Opens a URL in the active browser session. Requires an active session (use `start` first).
-
-### Input Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "url": {
-      "type": "string",
-      "description": "URL to navigate to"
-    },
-    "context": {
-      "type": "string",
-      "description": "Context name (default: \"default\")"
-    }
-  },
-  "required": ["url"]
-}
-```
+Load `url` in the active page of the running browser.
 
 ### Parameters
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `url` | string | Yes | Full URL including protocol (e.g., `https://github.com`) |
-| `context` | string | No | Browser context. Defaults to `"default"`. |
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `url` | `string` | Yes | Full URL including protocol (e.g. `https://github.com`). |
 
-### Output
+### Returns
 
-```json
-{
-  "url": "string",
-  "status": "navigated"
-}
+`Promise<void>`.
+
+### Throws
+
+- `Error("No browser session running")` — call `start` first.
+- `Error("No pages found in browser context")` — Chrome started but has no pages (very rare).
+
+### Example
+
+```typescript
+await browser.start('default');
+await browser.navigate('https://example.com');
 ```
-
-### Examples
-
-**Navigate to a website:**
-```json
-{
-  "name": "navigate",
-  "arguments": {
-    "url": "https://github.com"
-  }
-}
-```
-
-**Navigate in specific context:**
-```json
-{
-  "name": "navigate",
-  "arguments": {
-    "url": "https://github.com/settings/tokens",
-    "context": "github-logged-in"
-  }
-}
-```
-
-### Error Cases
-
-- No session running: Returns error indicating `start` must be called first
-- Navigation fails: Returns error with details
 
 ---
 
-## act
+## `act(action)`
 
-Perform an action in the browser (click, type, hover, etc.).
-
-### Description
-
-Uses LLM-powered element selection to perform actions described in natural language. The agent analyzes the page and finds the best matching element.
-
-### Input Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "action": {
-      "type": "string",
-      "description": "Action to perform (e.g., \"click the submit button\")"
-    },
-    "context": {
-      "type": "string",
-      "description": "Context name (default: \"default\")"
-    }
-  },
-  "required": ["action"]
-}
-```
+Perform an action in the browser using a natural-language description. The LLM finds the right element, then Stagehand dispatches the appropriate DOM event (click, type, select, press, etc.).
 
 ### Parameters
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `action` | string | Yes | Natural language description of the action to perform. |
-| `context` | string | No | Browser context. Defaults to `"default"`. |
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `action` | `string` | Yes | Plain-English action, e.g. `"click the sign-in button"`, `"type 'hello' into the search field"`, `"press Enter"`. |
 
-### Output
+### Returns
 
-```json
-{
-  "success": true
+`Promise<ActResult>`:
+
+```typescript
+interface ActResult {
+  success: boolean;
+  message: string;
+  actionDescription: string;
+  actions: Action[];
+  cacheStatus?: 'HIT' | 'MISS';
 }
 ```
+
+`cacheStatus` is set by Stagehand when an action was replayed from the LLM's action cache.
+
+### Throws
+
+- `Error("No browser session running")`.
+- Any error Stagehand surfaces (element not found, navigation interrupted, etc.) is propagated unchanged.
 
 ### Examples
 
-**Click a button:**
-```json
-{
-  "name": "act",
-  "arguments": {
-    "action": "click the submit button"
-  }
+```typescript
+const r = await browser.act('click the sign-in button');
+if (r.success) {
+  console.log('Signed in:', r.message);
 }
+
+await browser.act("type 'rishi@example.com' into the email field");
+await browser.act('press Enter');
+await browser.act('check the remember-me checkbox');
 ```
 
-**Type into a field:**
-```json
-{
-  "name": "act",
-  "arguments": {
-    "action": "type 'hello world' into the search field"
-  }
-}
-```
-
-**Select from dropdown:**
-```json
-{
-  "name": "act",
-  "arguments": {
-    "action": "select 'Option 2' from the country dropdown"
-  }
-}
-```
-
-**Check a checkbox:**
-```json
-{
-  "name": "act",
-  "arguments": {
-    "action": "check the 'Remember me' checkbox"
-  }
-}
-```
-
-### Action Types
-
-The `act` tool understands various action patterns:
-
-| Action Pattern | Example |
-|----------------|---------|
-| Click | `"click the login button"` |
-| Type | `"type 'my email' in the email field"` |
-| Select | `"select 'Python' from the language dropdown"` |
-| Check/Uncheck | `"check the agree checkbox"` |
-| Hover | `"hover over the user menu"` |
-| Press | `"press Enter"` |
-
-### Error Cases
-
-- No session running: Returns error
-- Element not found: Returns error with suggestion to use `observe` first
-- Action fails: Returns error with details
+If `act` fails because the LLM can't find the element, call `observe(...)` first to see what's actually on the page, then rephrase.
 
 ---
 
-## observe
+## `observe(instruction?)`
 
-Observe and identify elements on the current page.
-
-### Description
-
-Uses LLM-powered element detection to find interactive elements matching a description. Returns all matching elements with their properties.
-
-### Input Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "instruction": {
-      "type": "string",
-      "description": "What to look for on the page"
-    },
-    "context": {
-      "type": "string",
-      "description": "Context name (default: \"default\")"
-    }
-  },
-  "required": ["instruction"]
-}
-```
+Find interactive elements on the current page. With an instruction, returns elements matching the description. Without one, returns all actionable elements on the page.
 
 ### Parameters
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `instruction` | string | Yes | Natural language description of elements to find. |
-| `context` | string | No | Browser context. Defaults to `"default"`. |
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `instruction` | `string` | No | What to look for. Omit to enumerate every actionable element. |
 
-### Output
+### Returns
 
-```json
-{
-  "elements": [
-    {
-      "role": "string",
-      "name": "string",
-      "description": "string"
-    }
-  ]
+`Promise<Action[]>`:
+
+```typescript
+interface Action {
+  selector: string;        // CSS / Playwright-style selector
+  description: string;     // human-readable label
+  method?: string;         // e.g. "click", "fill", "press"
+  arguments?: string[];    // arguments the action would take
 }
 ```
+
+### Throws
+
+- `Error("No browser session running")`.
 
 ### Examples
 
-**Find all buttons:**
-```json
-{
-  "name": "observe",
-  "arguments": {
-    "instruction": "find all buttons on the page"
-  }
+```typescript
+// All actionable elements
+const everything = await browser.observe();
+
+// Filter to a kind of element
+const inputs = await browser.observe('find all form inputs');
+inputs.forEach((el) => console.log(el.description, '->', el.selector));
+
+// Sanity-check before acting
+const buttons = await browser.observe('find the submit button');
+if (buttons.length === 0) {
+  console.warn('No submit button found on this page');
 }
 ```
-
-**Find form inputs:**
-```json
-{
-  "name": "observe",
-  "arguments": {
-    "instruction": "find the login form fields"
-  }
-}
-```
-
-**Find links:**
-```json
-{
-  "name": "observe",
-  "arguments": {
-    "instruction": "find navigation links"
-  }
-}
-```
-
-**Find modal dialogs:**
-```json
-{
-  "name": "observe",
-  "arguments": {
-    "instruction": "find any dialog or modal"
-  }
-}
-```
-
-### Use Cases
-
-- Exploring unknown pages before acting
-- Verifying expected elements exist
-- Debugging element selection issues
 
 ---
 
-## extract
+## `extract(instruction?, schema?)`
 
-Extract structured data from the current page.
-
-### Description
-
-Uses LLM-powered extraction to pull structured data from the page. Can optionally validate against a Zod schema.
-
-### Input Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "instruction": {
-      "type": "string",
-      "description": "What data to extract from the page"
-    },
-    "schema": {
-      "type": "object",
-      "description": "Zod schema for the extracted data (optional)"
-    },
-    "context": {
-      "type": "string",
-      "description": "Context name (default: \"default\")"
-    }
-  },
-  "required": ["instruction"]
-}
-```
+Pull structured data off the current page using the LLM. The optional `schema` is a Zod schema (or a plain object Stagehand can interpret) for typed output.
 
 ### Parameters
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `instruction` | string | Yes | Natural language description of data to extract. |
-| `schema` | object | No | Zod schema to validate extracted data against. |
-| `context` | string | No | Browser context. Defaults to `"default"`. |
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `instruction` | `string` | No | What to extract. Omit to let the LLM decide what's important. |
+| `schema` | `unknown` | No | Optional schema for typed output. See Stagehand docs. |
 
-### Output
+### Returns
 
-```json
-{
-  "data": {}
-}
-```
+`Promise<unknown>` — the shape depends on your instruction and schema. With no schema, expect a `Record<string, unknown>` (or similar) of the LLM's choice.
+
+### Throws
+
+- `Error("No browser session running")`.
+- Any error Stagehand surfaces (page didn't load, schema validation failed, etc.) is propagated.
 
 ### Examples
 
-**Extract page title:**
-```json
-{
-  "name": "extract",
-  "arguments": {
-    "instruction": "get the page title and heading"
-  }
-}
+```typescript
+// Free-form
+const data = await browser.extract('get the page title and main heading');
+console.log(data);
+
+// Typed
+import { z } from 'zod';
+
+const ProductSchema = z.object({
+  name: z.string(),
+  price: z.string(),
+  inStock: z.boolean(),
+});
+
+const product = await browser.extract(
+  'extract product details',
+  ProductSchema,
+);
 ```
-
-**Extract product info:**
-```json
-{
-  "name": "extract",
-  "arguments": {
-    "instruction": "extract the product name, price, and description"
-  }
-}
-```
-
-**Extract with schema:**
-```json
-{
-  "name": "extract",
-  "arguments": {
-    "instruction": "extract user profile data",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "email": { "type": "string" },
-        "avatar": { "type": "string" }
-      },
-      "required": ["name", "email"]
-    }
-  }
-}
-```
-
-**Extract table data:**
-```json
-{
-  "name": "extract",
-  "arguments": {
-    "instruction": "extract all rows from the data table with columns: name, email, role"
-  }
-}
-```
-
-### Use Cases
-
-- Scraping structured data from web pages
-- Reading form values
-- Extracting data from tables
-- Pulling user profile information
 
 ---
 
-## Error Handling
+## `getAvailableContexts()`
 
-All tools return errors in a consistent format:
+List context names — i.e. directories under `contextDir`. Hidden directories and non-directories are filtered out.
 
-```json
-{
-  "isError": true,
-  "content": [
-    {
-      "type": "text",
-      "text": "Error message describing what went wrong"
-    }
-  ]
-}
+### Returns
+
+`string[]` — context names, possibly empty.
+
+### Example
+
+```typescript
+const contexts = browser.getAvailableContexts();
+console.log('Available:', contexts); // ['default', 'github-main', 'gmail']
 ```
-
-### Common Error Messages
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `No session running` | Browser not started | Call `start` first |
-| `Context does not exist` | Context not found | Create context with CLI or manually |
-| `Action failed` | Element not found or action error | Use `observe` to see elements, then retry |
-| `Navigation failed` | Invalid URL or network error | Check URL and try again |
 
 ---
 
-## Environment Variables
+## `getDebugUrl()`
 
-Tools respect the following environment variables:
+The Chrome DevTools inspection URL. Open in any Chrome to attach DevTools to the running session.
+
+### Returns
+
+`string` — e.g. `chrome://inspect#devtools/?ws=localhost:9222`.
+
+### Example
+
+```typescript
+const info = await browser.start('github-main');
+console.log(info.debugUrl); // same value
+console.log(browser.getDebugUrl());
+```
+
+---
+
+## `isActive()`
+
+Whether a session is currently running.
+
+### Returns
+
+`boolean`.
+
+### Example
+
+```typescript
+if (!browser.isActive()) {
+  await browser.start('default');
+}
+```
+
+---
+
+## `getCurrentContext()`
+
+The context name the running session is using. If no session is running, returns `config.defaultContext` (the configured default, which is `"default"` until you change it).
+
+### Returns
+
+`string`.
+
+### Example
+
+```typescript
+await browser.start('github-main');
+browser.getCurrentContext(); // 'github-main'
+
+await browser.useContext('gmail');
+browser.getCurrentContext(); // 'gmail'
+```
+
+---
+
+## Errors
+
+All throwing methods reject with a plain `Error` whose `.message` is meant to be human-readable. Agents should pattern-match on substrings like `"Context"` or `"No browser session running"` to decide what to do.
+
+| Common message | Cause | Fix |
+|----------------|-------|-----|
+| `No browser session running` | Called `navigate` / `act` / `observe` / `extract` before `start` | Call `start` first |
+| `Context '<x>' not found. Available contexts: ...` | Strict mode: directory must pre-exist | Run `browse-local context create <x>` first |
+| `Invalid context name: '...'` | Empty name, `..`, or contains `/` `\` | Use a plain identifier |
+| `Timeout waiting for Chrome remote debugging port` | Chrome failed to start cleanly | Check `BROWSER_BASE_HEADFUL=1` and inspect Chrome's stderr |
+
+---
+
+## Environment variables
+
+The `Browser` instance is built from a `ResolvedConfig` (via `resolveConfig()`), which reads:
 
 | Variable | Effect |
 |----------|--------|
-| `BROWSER_BASE_HEADFUL=1` | Show browser window instead of headless |
-| `BROWSER_BASE_CONTEXT_DIR` | Custom browser context directory |
-| `BROWSER_BASE_DEFAULT_CONTEXT` | Default context name |
-| `BROWSER_BASE_MODEL` | LLM model for act/observe/extract |
-| `OPENAI_API_KEY` | API key for OpenAI (or set `BROWSER_BASE_MODEL`) |
+| `BROWSER_BASE_HEADFUL=1` | Run Chrome visible |
+| `BROWSER_BASE_CONTEXT_DIR` | Override the contexts directory |
+| `BROWSER_BASE_DEFAULT_CONTEXT` | Override the default context name |
+| `BROWSER_BASE_MODEL` | LLM model string (e.g. `anthropic/claude-sonnet-4-6`) |
+| `BROWSER_BASE_VERBOSE` | `0`, `1`, or `2` — pino log level |
+| `BROWSER_BASE_BROWSER_PATH` | Path to a Chrome binary |
+| `OPENAI_API_KEY` | Required when `BROWSER_BASE_MODEL` is an OpenAI model |
+| `ANTHROPIC_API_KEY` | Required when `BROWSER_BASE_MODEL` is an Anthropic model |
