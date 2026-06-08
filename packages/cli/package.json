@@ -1,0 +1,26 @@
+{
+  "name": "@browserbase/local-cli",
+  "version": "0.1.0",
+  "description": "CLI for browser-base MCP server",
+  "type": "module",
+  "bin": {
+    "browse-local": "./dist/program.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "postinstall": "node -e \"require('./dist/program.js').run({ from: 'user' })\" if Windows else true"
+  },
+  "dependencies": {
+    "@browserbase/local": "workspace:*",
+    "commander": "^14.0.0",
+    "dotenv": "^16.5.0",
+    "fs-extra": "^11.3.0",
+    "inquirer": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
