@@ -11,3 +11,22 @@ export type { Config, ResolvedConfig } from './config.js';
 export { createLogger, createChildLogger } from './logger.js';
 export type { LogLevel } from './logger.js';
 
+// Tools for agent integration (pi, Claude Code, etc.)
+export {
+  createBrowserTool,
+  browserAction,
+  createNavigateTool,
+  createActTool,
+  createObserveTool,
+  createExtractTool,
+  navigate,
+  act,
+  observe,
+  extract,
+} from './tools/index.js';
+export type {
+  ToolContext,
+  ToolResult,
+  ToolUpdate,
+  ToolContent,
+} from './tools/index.js';

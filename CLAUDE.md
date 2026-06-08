@@ -46,22 +46,31 @@ browser-base/
 │   │       ├── server.ts         # Browser class (public API)
 │   │       ├── sessionManager.ts # Chrome + Stagehand lifecycle
 │   │       ├── config.ts         # resolveConfig / Config
-│   │       └── logger.ts         # pino logger
+│   │       ├── logger.ts         # pino logger
+│   │       └── tools/            # Agent integration tools
+│   │           ├── index.ts      # createBrowserTool, etc.
+│   │           ├── types.ts      # ToolResult, ToolContext, etc.
+│   │           ├── navigate.ts   # navigate tool
+│   │           ├── act.ts         # act tool
+│   │           ├── observe.ts    # observe tool
+│   │           └── extract.ts    # extract tool
 │   └── cli/                      # @browserbase/local-cli
 │       └── src/
 │           ├── program.ts        # browse-local entry point
 │           ├── projectConfig.ts  # config file loader
+│           ├── core/             # copy of core library
 │           └── commands/         # act, navigate, observe, extract,
 │                                #   use-context, status, contexts,
 │                                #   context create, install, start
+├── pi-extension.ts              # Pi agent extension (drop-in)
 ├── examples/
 │   ├── basic-usage.ts
 │   ├── context-management.ts
 │   └── autonomous-agent.ts
 └── docs/
     ├── tools.md      # Browser class API reference
-    ├── contexts.md    # context management guide
-    ├── install.md     # agent integration guide
+    ├── contexts.md   # context management guide
+    ├── install.md    # agent integration guide
     └── architecture.md
 ```
 
@@ -168,6 +177,49 @@ pnpm test     # run unit tests (Vitest)
 
 Unit tests mock `chrome-launcher` and `@browserbasehq/stagehand` — no real Chrome in CI.
 
+## Tools API (for agent integrations)
+
+The `packages/core/src/tools/` directory provides pre-built tools for integrating with
+coding agents like pi agent, Claude Code, etc.
+
+```typescript
+import { createBrowserTool } from '@browserbase/local/tools';
+
+const tool = createBrowserTool({
+  getBrowser: () => new Browser(resolveConfig({})),
+});
+
+// For pi agent:
+pi.registerTool(tool);
+
+// Or use individual tools:
+import { createNavigateTool, createActTool, createObserveTool, createExtractTool } from '@browserbase/local/tools';
+```
+
+### Tool types
+
+```typescript
+import type { ToolResult, ToolContext, ToolContent } from '@browserbase/local/tools';
+
+interface ToolResult {
+  success: boolean;
+  content: ToolContent[];  // [{ type: 'text' | 'image' | 'error', text?: string }]
+  details?: unknown;
+  error?: string;
+}
+```
+
+## Pi Agent Extension
+
+`pi-extension.ts` is a drop-in extension for pi agent. Copy it to:
+- `~/.pi/agent/extensions/browser-base.ts` (global)
+- `.pi/extensions/browser-base.ts` (project-local)
+
+The extension registers:
+- `browser` tool — unified tool for all browser actions
+- `/browser-contexts` command — list available contexts
+- `/browser-create-context` command — create new context
+
 ## Common gotchas
 
 - **"Context not found"** — the context dir doesn't exist on disk. Run `browse-local context create <name>` first, then pre-login manually.
@@ -186,3 +238,5 @@ Unit tests mock `chrome-launcher` and `@browserbasehq/stagehand` — no real Chr
 | Understand the CLI | `packages/cli/src/program.ts` + `commands/*.ts` |
 | Understand project-level config | `packages/cli/src/projectConfig.ts` |
 | See a real usage example | `examples/basic-usage.ts` |
+| Integrate with pi agent | `pi-extension.ts` |
+| Use the tools API | `packages/core/src/tools/index.ts` |

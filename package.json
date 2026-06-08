@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "cd packages/cli && tsc",
+    "build:pi": "npx tsc pi-extension.ts --outDir . --module nodenext --moduleResolution node16 --target es2022 --declaration --skipLibCheck --esModuleInterop",
     "test": "cd packages/cli && vitest run",
     "dev": "cd packages/cli && tsc --watch"
   },
@@ -19,6 +20,7 @@
     "fs-extra": "^11.3.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
+    "typebox": "^1.0.0",
     "ws": "^8.21.0",
     "zod": "^3.25.0"
   },
