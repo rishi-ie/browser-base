@@ -1,307 +1,207 @@
+#!/usr/bin/env tsx
 /**
- * Context Management Example
- * 
- * This example demonstrates how to:
- * - List available browser contexts
- * - Create new contexts
- * - Switch between contexts
- * - Use contexts for persistent logins
- * 
- * Run with: npx tsx examples/context-management.ts
+ * Context management example for browser-base.
+ *
+ * A "context" in browser-base is just a named Chrome user profile directory
+ * on disk. Each context persists cookies, local storage, and other state
+ * between sessions, which is what makes persistent logins possible.
+ *
+ * This example shows:
+ * - Listing the contexts that already exist on disk
+ * - Creating a new context (the directory that holds a Chrome profile)
+ * - Starting a session with a specific context
+ * - Switching to a different context at runtime
+ * - The recommended workflow for pre-logging-in to a site
+ *
+ * To run this example:
+ *   1. Make sure the CLI is available (it's part of this monorepo):
+ *        npx browse-local --help
+ *   2. Set your OpenAI API key:
+ *        export OPENAI_API_KEY=sk-...
+ *   3. Run the example:
+ *        npx tsx examples/context-management.ts
+ *
+ * The example will create a couple of contexts under `./browser-context/`
+ * and exercise the full switch/inspect lifecycle.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { SessionManager, resolveConfig } from '@browserbase/local';
+import { execSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { Browser, resolveConfig } from '@browserbase/local';
 
-const config = resolveConfig({
-  browserContextDir: './browser-context',
-  headless: true,
-});
-
-// ============================================
-// Utility Functions
-// ============================================
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /**
- * List all available contexts
+ * Create a context directory by invoking the bundled CLI.
+ * Equivalent to running `npx browse-local context create <name>` by hand.
  */
-function listContexts(): string[] {
-  const contextDir = config.browserContextDir;
-  
+function createContext(contextDir: string, name: string): void {
+  const contextPath = path.join(contextDir, name);
+  if (fs.existsSync(contextPath)) {
+    console.log(`  Context '${name}' already exists at ${contextPath}`);
+    return;
+  }
+  execSync(`npx browse-local context create ${name}`, {
+    stdio: 'inherit',
+    env: { ...process.env, BROWSER_BASE_CONTEXT_DIR: contextDir },
+  });
+}
+
+/**
+ * Pretty-print the list of contexts in the context directory.
+ */
+function printContexts(contextDir: string): void {
   if (!fs.existsSync(contextDir)) {
-    return [];
+    console.log('  (no contexts yet)');
+    return;
   }
-  
-  return fs.readdirSync(contextDir)
+  const entries = fs
+    .readdirSync(contextDir)
     .filter((name) => {
-      const fullPath = path.join(contextDir, name);
-      return fs.statSync(fullPath).isDirectory();
+      if (name.startsWith('.')) return false;
+      return fs.statSync(path.join(contextDir, name)).isDirectory();
     });
-}
-
-/**
- * Create a new context directory
- */
-function createContext(name: string): string {
-  const contextDir = path.join(config.browserContextDir, name);
-  
-  if (fs.existsSync(contextDir)) {
-    throw new Error(`Context "${name}" already exists at ${contextDir}`);
+  if (entries.length === 0) {
+    console.log('  (no contexts yet)');
+    return;
   }
-  
-  fs.mkdirSync(contextDir, { recursive: true });
-  return contextDir;
+  for (const name of entries) {
+    console.log(`  - ${name}`);
+  }
 }
 
-/**
- * Check if a context exists
- */
-function contextExists(name: string): boolean {
-  const contextDir = path.join(config.browserContextDir, name);
-  return fs.existsSync(contextDir);
-}
-
-// ============================================
-// Main Demo
-// ============================================
+// ---------------------------------------------------------------------------
+// Main demo
+// ---------------------------------------------------------------------------
 
 async function main() {
-  console.log('=== Browser Base Context Management Demo ===\n');
-  
-  const sessionManager = new SessionManager(config);
+  const contextDir = './browser-context';
 
-  // ============================================
-  // PART 1: List Available Contexts
-  // ============================================
+  // -------------------------------------------------------------------------
+  // Step 1: List available contexts.
+  //
+  // `getAvailableContexts` is a static helper that just reads the context
+  // directory and returns the names of every subdirectory (skipping hidden
+  // ones). It does NOT require a running browser session.
+  // -------------------------------------------------------------------------
   console.log('1. Listing available contexts...');
-  
-  const contexts = listContexts();
-  
-  if (contexts.length === 0) {
-    console.log('   No contexts found. Let\'s create one!\n');
-  } else {
-    console.log(`   Found ${contexts.length} context(s):`);
-    contexts.forEach((ctx) => {
-      console.log(`   - ${ctx}`);
-    });
-    console.log('');
-  }
-
-  // ============================================
-  // PART 2: Create a New Context
-  // ============================================
-  console.log('2. Creating a new context...');
-  
-  const newContextName = 'demo-context';
-  
-  if (!contextExists(newContextName)) {
-    const contextPath = createContext(newContextName);
-    console.log(`   Created: ${newContextName}`);
-    console.log(`   Path: ${contextPath}`);
-  } else {
-    console.log(`   Context "${newContextName}" already exists`);
-  }
+  printContexts(contextDir);
   console.log('');
 
-  // ============================================
-  // PART 3: Start Sessions with Different Contexts
-  // ============================================
-  console.log('3. Starting sessions with different contexts...');
-  
-  // Start with the default context
-  console.log('   Starting default session...');
-  const defaultSession = await sessionManager.createSession('default');
-  console.log(`   Default session: ${defaultSession.id}`);
-  console.log(`   Context dir: ${defaultSession.contextDir}`);
-  
-  // Start with our new context
-  console.log('   Starting demo-context session...');
-  const demoSession = await sessionManager.createSession(newContextName);
-  console.log(`   Demo session: ${demoSession.id}`);
-  console.log(`   Context dir: ${demoSession.contextDir}\n`);
+  // -------------------------------------------------------------------------
+  // Step 2: Create new contexts.
+  //
+  // A context is just a directory. We create them via the bundled CLI,
+  // which is what you'll typically use. Once created, the directory is
+  // ready to back a Chrome user profile.
+  // -------------------------------------------------------------------------
+  console.log('2. Creating contexts...');
+  createContext(contextDir, 'github-work');
+  createContext(contextDir, 'gmail-personal');
+  console.log('');
 
-  // ============================================
-  // PART 4: Use Context-Specific Navigation
-  // ============================================
-  console.log('4. Using context-specific navigation...');
-  
-  // Navigate in default context
-  console.log('   Navigating in default context...');
-  await sessionManager.navigate('default', 'https://example.com');
-  console.log('   Navigated to example.com in default context');
-  
-  // Navigate in demo context
-  console.log('   Navigating in demo-context...');
-  await sessionManager.navigate(newContextName, 'https://httpbin.org/html');
-  console.log('   Navigated to httpbin.org in demo-context\n');
+  console.log('Contexts on disk:');
+  printContexts(contextDir);
+  console.log('');
 
-  // ============================================
-  // PART 5: Switch Between Contexts
-  // ============================================
-  console.log('5. Demonstrating context switching...');
-  
-  // Get current session info
-  const currentSession = sessionManager.getSession('default');
-  console.log(`   Current session: ${currentSession?.id || 'none'}`);
-  
-  // Switch to demo context
-  console.log('   Switching to demo-context...');
-  await sessionManager.closeSession('default');
-  await sessionManager.createSession(newContextName);
-  console.log('   Switched to demo-context');
-  
-  // Verify the switch
-  const afterSwitch = sessionManager.getSession(newContextName);
-  console.log(`   Current session: ${afterSwitch?.id || 'none'}\n`);
+  // -------------------------------------------------------------------------
+  // Step 3: Configure the Browser and start a session.
+  //
+  // We point `contextDir` at the directory we just populated. The `start`
+  // method takes a context name as its only argument and returns a
+  // `SessionInfo` object. The context directory must already exist;
+  // `start` will throw if it doesn't.
+  // -------------------------------------------------------------------------
+  const config = resolveConfig({ contextDir });
+  const browser = new Browser(config);
 
-  // ============================================
-  // PART 6: Context for Pre-Login
-  // ============================================
-  console.log('6. Context usage for pre-logged-in sessions...');
-  
-  console.log(`
-   The real power of contexts is persistent logins:
-   
-   1. Create a context:
-      browse-local context create github-work
-   
-   2. Open Chrome with that profile:
-      google-chrome --user-data-dir=./browser-context/github-work
-   
-   3. Log into GitHub manually
-   
-   4. Close Chrome
-   
-   5. Now agents can use "github-work" context and
-      will already be logged in!
-   
-   This avoids re-authentication for every task.
-  `);
+  console.log('3. Starting session with the "github-work" context...');
+  const session = await browser.start('github-work');
+  console.log(`  Active context: ${browser.getCurrentContext()}`);
+  console.log(`  Session:        ${session.sessionId}`);
+  console.log(`  isActive:       ${browser.isActive()}`);
+  console.log('');
 
-  // ============================================
-  // PART 7: Cleanup
-  // ============================================
-  console.log('7. Cleaning up demo session...');
-  
-  await sessionManager.closeSession(newContextName);
-  console.log('   Session closed\n');
+  // -------------------------------------------------------------------------
+  // Step 4: List available contexts at runtime.
+  //
+  // `Browser.getAvailableContexts()` is the instance method — it just
+  // delegates to the same static helper, so you can call it any time
+  // (with or without a running session).
+  // -------------------------------------------------------------------------
+  console.log('4. Asking the Browser instance for available contexts...');
+  const contexts = browser.getAvailableContexts();
+  console.log(`  Found: ${contexts.join(', ')}`);
+  console.log('');
 
-  console.log('=== Demo Complete ===');
-  console.log(`
-  Useful CLI commands for context management:
-  
-  - List contexts: browse-local contexts
-  - Create context: browse-local context create <name>
-  - Delete context: rm -rf browser-context/<name>
-  `);
+  // -------------------------------------------------------------------------
+  // Step 5: Switch contexts at runtime.
+  //
+  // `useContext` ends the current session (if any) and starts a new one
+  // with the requested context. It's the right call when an agent needs
+  // to act as a different identity (e.g. work account vs personal
+  // account) without restarting the program.
+  //
+  // Note: `useContext` returns void; if you need the new SessionInfo
+  // (debug/CDP URLs, etc.) call `browser.start(name)` instead, which
+  // returns the info and is idempotent when a session is already
+  // running.
+  // -------------------------------------------------------------------------
+  console.log('5. Switching to "gmail-personal" via useContext...');
+  await browser.useContext('gmail-personal');
+  console.log(`  Active context: ${browser.getCurrentContext()}`);
+  console.log(`  Debug URL:      ${browser.getDebugUrl()}`);
+  console.log('');
+
+  // -------------------------------------------------------------------------
+  // Step 6: Switch back.
+  // -------------------------------------------------------------------------
+  console.log('6. Switching back to "github-work"...');
+  await browser.useContext('github-work');
+  console.log(`  Active context: ${browser.getCurrentContext()}`);
+  console.log('');
+
+  // -------------------------------------------------------------------------
+  // Step 7: End the session.
+  // -------------------------------------------------------------------------
+  console.log('7. Ending session...');
+  await browser.end();
+  console.log(`  isActive: ${browser.isActive()}`);
+  console.log('  Done.');
+
+  // -------------------------------------------------------------------------
+  // Step 8: The recommended pre-login workflow.
+  //
+  // This is the part where you turn an empty context into one that
+  // already has the cookies you need. We can't drive the actual browser
+  // GUI from this example, but the steps are:
+  //
+  //   1. Create the context (already done above).
+  //   2. Launch Chrome pointed at that user-data-dir.
+  //   3. Log in to the site by hand (including any 2FA).
+  //   4. Quit Chrome completely.
+  //   5. Now any agent that calls `browser.start('<name>')` inherits
+  //      those cookies and starts already logged in.
+  // -------------------------------------------------------------------------
+  console.log('\n8. Pre-login workflow (manual steps):');
+  console.log('   For context "github-work", the path is:');
+  console.log(`     ${path.resolve(contextDir, 'github-work')}`);
+  console.log('   Launch Chrome with that profile:');
+  console.log(
+    `     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ` +
+      `--user-data-dir="${path.resolve(contextDir, 'github-work')}"`
+  );
+  console.log('   Then log in to github.com in that Chrome window and quit.');
+  console.log(
+    '   After that, an agent can call `browser.start("github-work")` and\n' +
+      '   navigate to https://github.com already authenticated.'
+  );
 }
 
-// ============================================
-// MCP Tool Examples
-// ============================================
-
-/**
- * These examples show how context operations work via MCP tools
- */
-async function mcpContextExamples() {
-  console.log('\n=== MCP Tool Examples for Contexts ===\n');
-
-  // Tool: start with context
-  // {
-  //   "name": "start",
-  //   "arguments": { "context": "github-work" }
-  // }
-
-  // Tool: use_context (switch contexts)
-  // {
-  //   "name": "use_context",
-  //   "arguments": { "context": "gmail-personal" }
-  // }
-
-  // Tool: navigate with context
-  // {
-  //   "name": "navigate",
-  //   "arguments": {
-  //     "url": "https://github.com/settings/tokens",
-  //     "context": "github-work"
-  //   }
-  // }
-
-  // Tool: act with context
-  // {
-  //   "name": "act",
-  //   "arguments": {
-  //     "action": "click the new token button",
-  //     "context": "github-work"
-  //   }
-  // }
-
-  console.log('MCP tools for context management:');
-  console.log('- start (with context parameter)');
-  console.log('- use_context (to switch)');
-  console.log('- navigate (with optional context)');
-  console.log('- act (with optional context)');
-  console.log('- observe (with optional context)');
-  console.log('- extract (with optional context)');
-  console.log('- end (with optional context)');
-}
-
-// ============================================
-// Manual Login Workflow
-// ============================================
-
-/**
- * Shows how to pre-login to a site manually
- */
-async function manualLoginWorkflow() {
-  console.log('\n=== Manual Login Workflow ===\n');
-
-  console.log(`
-  Step-by-step: Pre-login to GitHub in a context
-  
-  1. Create the context:
-     $ browse-local context create github-work
-  
-  2. Launch Chrome with the context profile:
-     $ "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \\
-       --user-data-dir="$(pwd)/browser-context/github-work"
-  
-  3. In Chrome, navigate to github.com and log in:
-     - Go to github.com
-     - Click "Sign in"
-     - Enter credentials
-     - Complete 2FA if enabled
-     - Verify you're logged in (check your profile)
-  
-  4. Close Chrome completely (all windows)
-  
-  5. The context is now ready for agents:
-     - start({context: "github-work"})
-     - navigate({url: "https://github.com"})  // Already logged in!
-  `);
-
-  // Example: Use the logged-in context
-  console.log('Example MCP calls with the logged-in context:\n');
-  
-  console.log('Start session:');
-  console.log('{ "name": "start", "arguments": { "context": "github-work" } }');
-  
-  console.log('\nNavigate (no login needed):');
-  console.log('{ "name": "navigate", "arguments": { "url": "https://github.com" } }');
-  
-  console.log('\nCheck user info (already authenticated):');
-  console.log('{ "name": "extract", "arguments": { "instruction": "get the username from the page" } }');
-}
-
-// Run the examples
-main().catch((error) => {
-  console.error('Error:', error);
+main().catch((err) => {
+  console.error('Error:', err);
   process.exit(1);
 });
-
-// Uncomment to see additional examples:
-// mcpContextExamples();
-// manualLoginWorkflow();
-
-export { main, mcpContextExamples, manualLoginWorkflow };
