@@ -4,11 +4,14 @@
 
 ## Project overview
 
-`browser-base` is a self-hosted browser infrastructure for AI coding agents. It exposes a `Browser` class and a `browse-local` CLI that drive a real local Chrome via [Stagehand V3](https://github.com/browserbase/stagehand) (env: "LOCAL", CDP). The killer feature is **persistent login sessions** stored as Chrome user-profile directories ("contexts") — agents stay logged in across runs.
+`browser-base` is a **pi agent plugin** that gives the LLM running in pi a local Chrome with persistent login sessions. It's a self-hosted alternative to the cloud Browserbase product — same capabilities, runs entirely on your machine.
+
+The LLM uses the `browser` tool to operate across the internet: browse websites, click buttons, fill forms, log into sites once and stay logged in via Chrome profiles.
 
 Published as:
 - `@browserbase/local` — the library (`Browser` class)
 - `@browserbase/local-cli` — the `browse-local` binary
+- `pi-extension.ts` — pi agent plugin (drop-in)
 
 ## Quick reference (for agents)
 
