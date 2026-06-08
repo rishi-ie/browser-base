@@ -56,15 +56,20 @@ const DEFAULTS: Omit<ResolvedConfig, 'port'> = {
  * Priority: CLI flags > env vars > defaults
  */
 export function resolveConfig(options: Partial<Config> = {}): ResolvedConfig {
+  const envPort = process.env['BROWSER_BASE_PORT'];
+  const envChromePort = process.env['BROWSER_BASE_CHROME_PORT'];
+  const envVerbose = process.env['BROWSER_BASE_VERBOSE'];
+  const envHost = process.env['BROWSER_BASE_HOST'];
+
   return {
-    headful: options.headful ?? (process.env['BROWSER_BASE_HEADFUL'] === '1' || DEFAULTS.headful),
+    headful: options.headful ?? process.env['BROWSER_BASE_HEADFUL'] === '1',
     browserPath: options.browserPath ?? (process.env['BROWSER_BASE_BROWSER_PATH'] ?? DEFAULTS.browserPath),
     contextDir: options.contextDir ?? (process.env['BROWSER_BASE_CONTEXT_DIR'] ?? DEFAULTS.contextDir),
-    chromePort: options.chromePort ?? DEFAULTS.chromePort,
-    port: options.port ?? (process.env['BROWSER_BASE_PORT'] ? parseInt(process.env['BROWSER_BASE_PORT'], 10) : undefined),
-    host: options.host ?? DEFAULTS.host,
+    chromePort: options.chromePort ?? (envChromePort ? parseInt(envChromePort, 10) : DEFAULTS.chromePort),
+    port: options.port ?? (envPort ? parseInt(envPort, 10) : undefined),
+    host: options.host ?? (envHost ?? DEFAULTS.host),
     model: options.model ?? (process.env['BROWSER_BASE_MODEL'] ?? DEFAULTS.model),
-    verbose: options.verbose ?? (process.env['BROWSER_BASE_VERBOSE'] ? parseInt(process.env['BROWSER_BASE_VERBOSE'], 10) as 0 | 1 | 2 : DEFAULTS.verbose),
+    verbose: options.verbose ?? (envVerbose ? (parseInt(envVerbose, 10) as 0 | 1 | 2) : DEFAULTS.verbose),
     defaultContext: options.defaultContext ?? (process.env['BROWSER_BASE_DEFAULT_CONTEXT'] ?? DEFAULTS.defaultContext),
   };
 }
@@ -78,13 +83,18 @@ export function validateConfig(config: ResolvedConfig): void {
     fs.mkdirSync(config.contextDir, { recursive: true });
   }
 
-  // Validate port range
-  if (config.port !== undefined && (config.port < 1 || config.port > 65535)) {
-    throw new Error(`Port must be between 1 and 65535, got ${config.port}`);
+  // Validate port range (with NaN check)
+  if (config.port !== undefined && (!Number.isFinite(config.port) || config.port < 1 || config.port > 65535)) {
+    throw new Error(`Port must be an integer between 1 and 65535, got ${config.port}`);
   }
 
-  // Validate verbose range
-  if (config.verbose < 0 || config.verbose > 2) {
+  // Validate chromePort range
+  if (!Number.isFinite(config.chromePort) || config.chromePort < 1 || config.chromePort > 65535) {
+    throw new Error(`Chrome port must be an integer between 1 and 65535, got ${config.chromePort}`);
+  }
+
+  // Validate verbose range (with NaN check)
+  if (!Number.isFinite(config.verbose) || config.verbose < 0 || config.verbose > 2) {
     throw new Error(`Verbose must be 0, 1, or 2, got ${config.verbose}`);
   }
 }
