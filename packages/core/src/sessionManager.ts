@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ChildProcess } from 'child_process';
+
 import type { Logger } from 'pino';
-import { launch, getChromePath, type LaunchedChrome } from 'chrome-launcher';
+import { getChromePath } from 'chrome-launcher';
 import { V3 } from '@browserbasehq/stagehand';
 import type { ResolvedConfig } from './config.js';
 import { contextExists, getAvailableContexts } from './config.js';
@@ -47,11 +47,11 @@ export class SessionManager {
   private headful: boolean;
   private model: string;
   private verbose: 0 | 1 | 2;
-  private browserProcess: ChildProcess | null = null;
+
   private chromePort: number;
   private logger: Logger;
   private isRunning: boolean = false;
-  private chromeInstance: LaunchedChrome | null = null;
+
 
   constructor(config: ResolvedConfig) {
     this.currentContext = config.defaultContext;
@@ -102,36 +102,24 @@ export class SessionManager {
     // Find Chrome path
     const chromePath = this.browserPath ?? getChromePath();
 
-    // Launch Chrome
-    this.logger.info(`Launching Chrome with context: ${context}`);
+    // Create V3 (Stagehand) with LOCAL environment.
+    // Stagehand will launch Chrome via its own chrome-launcher integration,
+    // so we pass executablePath + userDataDir in localBrowserLaunchOptions.
+    // We do NOT launch Chrome ourselves — that caused a double-launch conflict
+    // where the second Chrome's WebSocket (at ws://localhost:9222/devtools/browser/...)
+    // wasn't reachable because we passed the bare ws://localhost:9222.
+    this.logger.info(`Starting Stagehand with context: ${context}`);
 
-    this.chromeInstance = await launch({
-      chromePath,
-      userDataDir: contextPath,
-      port: this.chromePort,
-      chromeFlags: [
-        '--no-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        `--remote-debugging-port=${this.chromePort}`,
-      ],
-    });
-
-    this.browserProcess = this.chromeInstance.process as ChildProcess;
-
-    // Wait for CDP to be ready
-    await this.waitForCdp();
-
-    // Create V3 (Stagehand) with LOCAL environment
-    // Pass the full model name including provider prefix (e.g., "openai/gpt-4.1-mini")
-    // Stagehand uses the provider prefix to look up the API key env var
     this.stagehand = new V3({
       env: 'LOCAL',
       localBrowserLaunchOptions: {
-        cdpUrl: `ws://localhost:${this.chromePort}`,
         executablePath: chromePath,
         userDataDir: contextPath,
         headless: !this.headful,
+        // NOTE: We intentionally do NOT set cdpUrl here.
+        // Omitting cdpUrl causes Stagehand to call launchLocalChrome()
+        // internally, which properly discovers the WebSocket URL via /json/version
+        // and returns the full path (ws://localhost:9222/devtools/browser/<id>).
       },
       model: this.model,
       verbose: this.verbose,
@@ -155,25 +143,6 @@ export class SessionManager {
   /**
    * Wait for CDP WebSocket to be ready.
    */
-  private async waitForCdp(maxWaitMs: number = 30000): Promise<void> {
-    const start = Date.now();
-    const checkInterval = 100;
-
-    while (Date.now() - start < maxWaitMs) {
-      try {
-        const response = await fetch(`http://localhost:${this.chromePort}/json/version`);
-        if (response.ok) {
-          return;
-        }
-      } catch {
-        // Not ready yet
-      }
-      await new Promise((resolve) => setTimeout(resolve, checkInterval));
-    }
-
-    throw new Error('Timeout waiting for Chrome remote debugging port');
-  }
-
   /**
    * Switch to a different browser context. Restarts the session if running.
    */
@@ -203,24 +172,13 @@ export class SessionManager {
   async end(): Promise<void> {
     if (this.stagehand) {
       try {
+        // Stagehand.close() handles CDP cleanup AND Chrome kill via
+        // cleanupLocalBrowser when keepAlive is not set.
         await this.stagehand.close();
       } catch (err) {
         this.logger.warn(`Error closing stagehand: ${err}`);
       }
       this.stagehand = null;
-    }
-
-    if (this.chromeInstance) {
-      try {
-        this.chromeInstance.kill();
-      } catch (err) {
-        this.logger.warn(`Error killing Chrome: ${err}`);
-      }
-      this.chromeInstance = null;
-    }
-
-    if (this.browserProcess) {
-      this.browserProcess = null;
     }
 
     this.isRunning = false;
