@@ -65,25 +65,38 @@ export class SessionManager {
   }
 
   /**
+   * Validate a context name to prevent path traversal.
+   */
+  private validateContextName(name: string): void {
+    if (!name || name.includes('/') || name.includes('\\') || name === '..' || name === '.') {
+      throw new Error(`Invalid context name: '${name}'. Context names must be non-empty and cannot contain path separators.`);
+    }
+  }
+
+  /**
    * Start a browser session with the given context.
    */
   async start(contextName?: string): Promise<SessionInfo> {
     const context = contextName ?? this.currentContext;
+    this.validateContextName(context);
 
     // If already running, return existing session info
     if (this.isRunning) {
       return {
         sessionId: this.currentContext,
         debugUrl: this.getDebugUrl(),
-        cdpUrl: `ws://localhost:${this.chromePort}`,
+        cdpUrl: this.getCdpUrl(),
         context: this.currentContext,
       };
     }
 
-    // Ensure context directory exists
+    // Strict mode: context directory must already exist on disk
     const contextPath = path.join(this.contextDir, context);
     if (!fs.existsSync(contextPath)) {
-      fs.mkdirSync(contextPath, { recursive: true });
+      const available = this.getAvailableContexts();
+      throw new Error(
+        `Context '${context}' not found. Available contexts: ${available.join(', ') || '(none)'}`
+      );
     }
 
     // Find Chrome path
@@ -110,11 +123,8 @@ export class SessionManager {
     await this.waitForCdp();
 
     // Create V3 (Stagehand) with LOCAL environment
-    // Extract just the model name without provider prefix (e.g., "gpt-4.1-mini" from "openai/gpt-4.1-mini")
-    const modelName = this.model.includes('/')
-      ? this.model.split('/')[1]
-      : this.model;
-
+    // Pass the full model name including provider prefix (e.g., "openai/gpt-4.1-mini")
+    // Stagehand uses the provider prefix to look up the API key env var
     this.stagehand = new V3({
       env: 'LOCAL',
       localBrowserLaunchOptions: {
@@ -123,7 +133,7 @@ export class SessionManager {
         userDataDir: contextPath,
         headless: !this.headful,
       },
-      model: modelName,
+      model: this.model,
       verbose: this.verbose,
     });
 
@@ -165,10 +175,10 @@ export class SessionManager {
   }
 
   /**
-   * Switch to a different browser context.
+   * Switch to a different browser context. Restarts the session if running.
    */
-  async useContext(name: string): Promise<void> {
-    const contextPath = path.join(this.contextDir, name);
+  async useContext(name: string): Promise<SessionInfo> {
+    this.validateContextName(name);
 
     if (!contextExists(this.contextDir, name)) {
       const available = this.getAvailableContexts();
@@ -182,8 +192,9 @@ export class SessionManager {
       await this.end();
     }
 
-    // Switch context
+    // Switch context and start new session
     this.currentContext = name;
+    return this.start(name);
   }
 
   /**
@@ -225,12 +236,13 @@ export class SessionManager {
     }
 
     const ctx = this.stagehand.context;
-    const pages = ctx.pages();
-    if (pages.length === 0) {
+    // Prefer the active page (user's current tab) over pages[0] (oldest)
+    const page = ctx.activePage() ?? ctx.pages()[0];
+    if (!page) {
       throw new Error('No pages found in browser context');
     }
 
-    await pages[0].goto(url);
+    await page.goto(url);
     this.logger.debug(`Navigated to: ${url}`);
   }
 
@@ -293,6 +305,20 @@ export class SessionManager {
    */
   getDebugUrl(): string {
     return `chrome://inspect#devtools/?ws=localhost:${this.chromePort}`;
+  }
+
+  /**
+   * Get the Chrome DevTools Protocol WebSocket URL.
+   */
+  getCdpUrl(): string {
+    return `ws://localhost:${this.chromePort}`;
+  }
+
+  /**
+   * Get the Chrome remote debugging port.
+   */
+  getChromePort(): number {
+    return this.chromePort;
   }
 
   /**
