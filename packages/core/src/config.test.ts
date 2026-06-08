@@ -93,12 +93,12 @@ describe('config', () => {
 
     it('throws when port is out of range', () => {
       const config = resolveConfig({ contextDir: testDir, port: 70000 });
-      expect(() => validateConfig(config)).toThrow('Port must be between 1 and 65535');
+      expect(() => validateConfig(config)).toThrow('Port must be an integer between 1 and 65535');
     });
 
     it('throws when port is less than 1', () => {
       const config = resolveConfig({ contextDir: testDir, port: 0 });
-      expect(() => validateConfig(config)).toThrow('Port must be between 1 and 65535');
+      expect(() => validateConfig(config)).toThrow('Port must be an integer between 1 and 65535');
     });
 
     it('throws when verbose is invalid', () => {
