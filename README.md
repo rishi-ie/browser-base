@@ -1,108 +1,174 @@
 # browser-base
 
-Self-hosted browser infrastructure for AI coding agents. Give your agent a local Chrome with persistent login sessions — no cloud, no per-session billing, no MCP plumbing.
+Give your coding agent a local Chrome with persistent login sessions. No cloud, no per-session billing, no MCP plumbing. The agent just runs `browse-local act "click sign in"` and it works.
 
-`browser-base` is a **programmatic API** (`Browser` class) plus a thin **CLI** (`browse-local`). Agents and scripts drive a real Chrome running on the same machine through natural-language `act` / `observe` / `extract` calls backed by [Stagehand](https://github.com/browserbase/stagehand).
+browser-base is a programmatic `Browser` class + `browse-local` CLI. Stagehand V3 handles the LLM-to-browser translation.
 
 ---
 
-## Quick Start
+## Give this to your agent
+
+Copy and paste the following into your agent. It will set everything up automatically.
+
+```
+I have browser-base installed in this project. It gives me a local Chrome
+with persistent login sessions via browser contexts (Chrome user profile dirs).
+
+Use it like this:
+
+  browse-local context create <name>           # create a new browser context
+  browse-local navigate "<url>"               # open a URL (no LLM needed)
+  browse-local act "<action>"                 # click/type using natural language
+  browse-local observe "<instruction>"        # find actionable elements on page
+  browse-local extract "<instruction>"        # extract structured data from page
+  browse-local status                          # show current config and session state
+  browse-local contexts                       # list available contexts
+
+Key concepts:
+- A "context" is a Chrome user profile dir (stores cookies, logins, localStorage)
+- Create a context: browse-local context create <name>
+- Pre-login by opening Chrome against the context dir manually, then close it
+- The agent then uses that context and stays logged in across sessions
+- Contexts are stored at ./browser-context/ by default
+
+Browser class API (import from @browserbase/local):
+  import { Browser, resolveConfig } from '@browserbase/local';
+  const browser = new Browser(resolveConfig({ contextDir: './browser-context' }));
+  await browser.start('context-name');        // launch Chrome
+  await browser.navigate('https://...');
+  await browser.act('click the button');
+  await browser.observe('find the form');
+  await browser.extract('get the page title');
+  await browser.useContext('other-context');  // switch (restarts session)
+  await browser.end();                        // close Chrome
+
+Environment variables:
+  OPENAI_API_KEY               (required for act/observe/extract)
+  BROWSER_BASE_HEADFUL=1       (show Chrome window)
+  BROWSER_BASE_MODEL=anthropic/claude-sonnet-4-5  (change LLM)
+  BROWSER_BASE_CONTEXT_DIR     (default: ./browser-context)
+```
+
+---
+
+## Agent integration
+
+### Pi Agent
+
+Add the system prompt above to your project's `AGENTS.md` (or create one). Pi Agent reads `AGENTS.md` in the project root.
+
+```bash
+# In your project directory:
+browse-local install --agent pi-agent
+```
+
+Or manually:
 
 ```bash
 # 1. Install the CLI
 npm install -g @browserbase/local-cli
 
-# 2. Create a context (a Chrome user profile dir)
+# 2. Create a default context
 browse-local context create default
 
-# 3. Manually log in to whatever you need
+# 3. Add to your project's AGENTS.md (or create it):
+cat >> AGENTS.md << 'EOF'
+## Browser
+
+Use `browse-local` to control a local Chrome with persistent logins:
+  browse-local act "click the sign-in button"
+  browse-local navigate "https://github.com"
+  browse-local observe "find the search box"
+  browse-local extract "get the page title"
+EOF
+
+# 4. Pre-login (do this once manually):
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --user-data-dir="$(pwd)/browser-context/default"
+# Log in, close Chrome. Session is now persisted.
+```
+
+### Claude Code
+
+Claude Code reads `CLAUDE.md` in the project root. Add browser-base there:
+
+```bash
+# 1. Install
+npm install -g @browserbase/local-cli
+
+# 2. Create context
+browse-local context create default
+
+# 3. Install into project
+browse-local install --agent claude-code
+
+# 4. Pre-login
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --user-data-dir="$(pwd)/browser-context/default"
+```
+
+### Cursor, VS Code, or any agent
+
+```bash
+npm install -g @browserbase/local-cli
+browse-local install --agent both
+```
+
+For agents without a dedicated installer, the copy-paste prompt above works universally.
+
+---
+
+## Quick install
+
+```bash
+# 1. Install the CLI
+npm install -g @browserbase/local-cli
+
+# 2. Create a context (a Chrome user profile directory)
+browse-local context create default
+
+# 3. Pre-login manually (do this once)
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --user-data-dir="$(pwd)/browser-context/default"
+# Log in, complete 2FA, close Chrome. Session is now on disk.
 
 # 4. Set your LLM API key
 export OPENAI_API_KEY=sk-...
 
-# 5. Use it programmatically
-```
-
-```typescript
-import { Browser, resolveConfig } from '@browserbase/local';
-
-const browser = new Browser(resolveConfig({ contextDir: './browser-context' }));
-await browser.start('default');
-await browser.navigate('https://github.com');
-
-const result = await browser.act('click the sign-in button');
-const elements = await browser.observe('find the search box');
-const data = await browser.extract('get the page title');
-
-await browser.end();
+# 5. Use it
+browse-local navigate "https://github.com"
+browse-local act "click the sign in button"
 ```
 
 ---
 
-## The user pipeline
-
-browser-base is designed around **persistent login sessions**, not throwaway browsers.
-
-### 1. Install
+## CLI reference
 
 ```bash
-npm install -g @browserbase/local-cli
+browse-local act "<action>"           # click/type using natural language
+browse-local navigate "<url>"         # open a URL (no LLM needed)
+browse-local observe "[instruction]"  # list actionable elements on page
+browse-local extract "[instruction]"  # extract structured data from page
+browse-local use-context <name>       # switch context (restarts session)
+browse-local start                    # long-running session (block until SIGINT)
+browse-local status                   # current config and session state
+browse-local contexts                 # list available contexts
+browse-local context create <name>    # create a new context directory
+browse-local install                  # set up for a specific agent
 ```
 
-Or, if you only need the library:
+**One-shot vs long-running:** `act`, `navigate`, `observe`, `extract` start a session, perform the action, then close Chrome. Use `start` (blocks) or `--keep-alive` flag to keep the session alive across multiple calls.
 
-```bash
-npm install @browserbase/local
-```
-
-### 2. Create a context
-
-A **context** is a Chrome user profile directory under `./browser-context/`. Each context is fully isolated (cookies, local storage, history).
-
-```bash
-browse-local context create github-main
-```
-
-This creates `./browser-context/github-main/`.
-
-### 3. Manually log in
-
-Open Chrome against the new context dir and log in:
-
-```bash
-# macOS
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --user-data-dir="$(pwd)/browser-context/github-main"
-
-# Linux
-google-chrome --user-data-dir=./browser-context/github-main
-```
-
-Log in, complete any 2FA, then close Chrome. The session is now persisted on disk.
-
-### 4. Drive it programmatically
-
-```typescript
-import { Browser, resolveConfig } from '@browserbase/local';
-
-const browser = new Browser(resolveConfig({ contextDir: './browser-context' }));
-
-// Strict mode: the context must already exist on disk
-await browser.start('github-main');
-await browser.navigate('https://github.com');
-await browser.act('open the notifications dropdown');
-await browser.end();
-```
-
-See [examples/basic-usage.ts](examples/basic-usage.ts) for a runnable demo.
+| Flag | Description |
+|------|-------------|
+| `--context <name>` | Use this context (overrides default) |
+| `--headful` | Show the Chrome window |
+| `--keep-alive` | Don't close Chrome after a one-shot command |
+| `--model <model>` | LLM model (e.g. `openai/gpt-4.1-mini`) |
 
 ---
 
 ## Programmatic API
-
-The `Browser` class is the public API. See [docs/tools.md](docs/tools.md) for the full reference.
 
 ```typescript
 import { Browser, resolveConfig } from '@browserbase/local';
@@ -115,205 +181,111 @@ const browser = new Browser(resolveConfig({
   verbose: 0,
 }));
 
-// Lifecycle
-await browser.start('github-main');         // launch Chrome with this context
-await browser.end();                         // close everything (idempotent)
-await browser.useContext('gmail');           // switch contexts (restarts session)
+// Launch Chrome with a context (must already exist on disk)
+const session = await browser.start('github-main');
+// session: { sessionId, debugUrl, cdpUrl, context }
 
-// Driving the browser
+// Drive the browser
 await browser.navigate('https://github.com');
-const result  = await browser.act('click the sign-in button');
-const items   = await browser.observe('find the search box');
-const payload = await browser.extract('get the page title', optionalSchema);
+const result = await browser.act('click the sign-in button');
+const elements = await browser.observe('find the search box');
+const data = await browser.extract('get the page title');
 
-// Introspection
-browser.isActive();             // true / false
-browser.getCurrentContext();     // 'github-main'
-browser.getDebugUrl();           // chrome://inspect#...
-browser.getAvailableContexts();  // ['default', 'github-main', 'gmail']
-```
-
-`resolveConfig` merges your options with environment variables and built-in defaults. The only required field is `contextDir`.
-
----
-
-## CLI reference
-
-The `browse-local` CLI is a thin wrapper around the same `Browser` class.
-
-```bash
-browse-local start                  # long-running process that keeps a session alive
-browse-local contexts               # list available contexts
-browse-local context create <name>  # create a new context dir
-browse-local install                # install into Claude Desktop, Cursor, etc.
-```
-
-`browse-local start` is what agents run when they need an MCP server. It boots the same `Browser` class and exposes a long-lived session.
-
-```bash
-browse-local start \
-  --context-dir ./browser-context \
-  --default-context github-main \
-  --headful \
-  --model openai/gpt-4.1-mini \
-  --verbose 1
-```
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--context-dir <path>` | Directory holding browser contexts | `./browser-context` |
-| `--default-context <name>` | Context to start with | `default` |
-| `--headful` | Show the browser window | headless |
-| `--model <model>` | LLM model string (e.g. `openai/gpt-4.1-mini`) | `openai/gpt-4.1-mini` |
-| `--verbose <0\|1\|2>` | Logging verbosity | `0` |
-| `--browser-path <path>` | Path to Chrome binary | auto-detect |
-| `--chrome-port <port>` | Chrome remote debugging port | `9222` |
-
----
-
-## Context management
-
-A **context** is just a directory on disk under `<contextDir>/<name>/`. The directory is given to Chrome as `--user-data-dir`, so cookies, local storage, history, and saved logins persist between sessions.
-
-```bash
-browse-local contexts
-# Available contexts:
-#   - default
-#   - github-main
-#   - gmail
-
-browse-local context create stripe-dashboard
-# Created context 'stripe-dashboard' at /abs/path/browser-context/stripe-dashboard
-```
-
-**Strict mode is the default.** `browser.start('nonexistent')` throws — the directory must exist. This is intentional: contexts are pre-loaded with manual logins, and silent auto-creation leads to confusing "why am I not logged in" bugs.
-
-Switch contexts at runtime:
-
-```typescript
+// Switch context (ends current session, starts new one)
 await browser.useContext('gmail');
+
+// Check state
+browser.isActive();              // true
+browser.getCurrentContext();     // 'gmail'
+browser.getDebugUrl();            // chrome://inspect#...
+browser.getAvailableContexts();  // ['default', 'github-main', 'gmail']
+
+// Clean up
+await browser.end();
 ```
 
-This ends the current session, then starts a new one with the named context.
+All methods: `start(context?)`, `end()`, `useContext(name)`, `navigate(url)`, `act(action)`, `observe(instruction?)`, `extract(instruction?, schema?)`, `isActive()`, `getCurrentContext()`, `getDebugUrl()`, `getCdpUrl()`, `getAvailableContexts()`.
 
-See [docs/contexts.md](docs/contexts.md) for the full guide: backup, share, isolate, and re-login.
+See [docs/tools.md](docs/tools.md) for the full reference.
+
+---
+
+## Contexts (persistent logins)
+
+A **context** is a Chrome user profile directory. browser-base doesn't create the session — you do, by opening Chrome against the context dir once:
+
+```bash
+browse-local context create github-main
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --user-data-dir="$(pwd)/browser-context/github-main"
+# Log in, close Chrome
+```
+
+Now the agent uses that context and stays logged in forever.
+
+```bash
+browse-local contexts                # list all contexts
+browse-local context create <name>   # create a new one
+browse-local act "click compose" --context github-main  # use a specific one
+```
+
+See [docs/contexts.md](docs/contexts.md) for the full guide.
 
 ---
 
 ## Environment variables
 
-Configuration is resolved as **CLI options > env vars > defaults**.
-
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `BROWSER_BASE_CONTEXT_DIR` | Browser context directory | `./browser-context` |
+| `OPENAI_API_KEY` | Required for `act`/`observe`/`extract` | — |
+| `ANTHROPIC_API_KEY` | For Anthropic models | — |
+| `BROWSER_BASE_HEADFUL` | `1` = show Chrome window | `0` (headless) |
+| `BROWSER_BASE_MODEL` | LLM model (`provider/model`) | `openai/gpt-4.1-mini` |
+| `BROWSER_BASE_CONTEXT_DIR` | Browser contexts directory | `./browser-context` |
 | `BROWSER_BASE_DEFAULT_CONTEXT` | Default context name | `default` |
-| `BROWSER_BASE_HEADFUL` | Set to `1` to show the browser | `0` (headless) |
-| `BROWSER_BASE_MODEL` | LLM model string (provider/name) | `openai/gpt-4.1-mini` |
-| `BROWSER_BASE_VERBOSE` | Logging verbosity (0, 1, 2) | `0` |
+| `BROWSER_BASE_VERBOSE` | Log verbosity (`0`/`1`/`2`) | `0` |
 | `BROWSER_BASE_BROWSER_PATH` | Path to Chrome binary | auto-detect |
-| `OPENAI_API_KEY` | Required for default model | — |
-| `ANTHROPIC_API_KEY` | Required for Anthropic models | — |
-
-The `resolveConfig()` function reads these automatically. See [examples/.env.example](examples/.env.example) for a template.
-
----
-
-## Architecture
-
-```
-Agent / script
-     │
-     │  new Browser(resolveConfig(...))
-     ▼
-┌────────────────────────────────────────────────────────┐
-│  Browser  (packages/core/src/server.ts)                │
-│                                                        │
-│  - start / end / useContext                            │
-│  - navigate / act / observe / extract                  │
-│  - getAvailableContexts / getDebugUrl / isActive       │
-└────────────────────────────────────────────────────────┘
-     │
-     ▼
-┌────────────────────────────────────────────────────────┐
-│  SessionManager  (packages/core/src/sessionManager.ts) │
-│                                                        │
-│  - launches Chrome via chrome-launcher                 │
-│  - drives Chrome via @browserbasehq/stagehand (V3,     │
-│    env: "LOCAL", connected over CDP)                   │
-│  - owns the active context name and lifetime           │
-└────────────────────────────────────────────────────────┘
-     │
-     ▼
-   Chrome (local process, --user-data-dir=<context>)
-```
-
-Key files:
-- `packages/core/src/server.ts` — `Browser` class
-- `packages/core/src/sessionManager.ts` — Chrome lifecycle + Stagehand
-- `packages/core/src/config.ts` — `resolveConfig` / `Config` / `ResolvedConfig`
-- `packages/core/src/index.ts` — public exports
-- `packages/cli/src/program.ts` — `browse-local` entry point
-- `packages/cli/src/commands/*.ts` — `start`, `contexts`, `context create`, `install`
-
-See [docs/architecture.md](docs/architecture.md) for the deep dive.
 
 ---
 
 ## Requirements
 
-- **Node.js 22+** (the workspace uses ESM + Node 22 type definitions)
-- **Chrome or Chromium** on `PATH` or at a known location (`chrome-launcher` auto-detects on macOS / Linux)
-- **An LLM API key** for `act` / `observe` / `extract` (default model: `openai/gpt-4.1-mini`; also supports Anthropic via `BROWSER_BASE_MODEL=anthropic/...`)
+- **Node.js 22+**
+- **Chrome or Chromium** (auto-detected on macOS/Linux)
+- **An LLM API key** for `act` / `observe` / `extract`
 
 ---
 
-## Documentation
+## Project structure
 
-- [docs/tools.md](docs/tools.md) — `Browser` class reference (every method, parameter, return value)
-- [docs/install.md](docs/install.md) — install for Pi Agent, Claude Code, Cursor, VS Code, generic agents
-- [docs/contexts.md](docs/contexts.md) — context creation, pre-login workflow, sharing
-- [docs/architecture.md](docs/architecture.md) — system design, request flow, components
-- [docs/README.md](docs/README.md) — docs index
-
-## Examples
-
-- [examples/basic-usage.ts](examples/basic-usage.ts) — full lifecycle (start → navigate → act → observe → extract → end)
-- [examples/context-management.ts](examples/context-management.ts) — listing, creating, and switching contexts
-- [examples/autonomous-agent.ts](examples/autonomous-agent.ts) — multi-step agent loop
-
-Run with `npx tsx examples/<file>.ts` after creating a context and exporting `OPENAI_API_KEY`.
-
----
-
-## Contributing
-
-```bash
-# Build both packages
-pnpm install
-pnpm build
-
-# Run tests
-cd packages/core && pnpm test
-
-# Lint
-pnpm lint
+```
+packages/
+├── core/                    # @browserbase/local
+│   └── src/
+│       ├── server.ts        # Browser class (public API)
+│       ├── sessionManager.ts # Chrome + Stagehand lifecycle
+│       ├── config.ts        # resolveConfig / Config
+│       └── index.ts         # public exports
+└── cli/                     # @browserbase/local-cli
+    └── src/
+        ├── program.ts       # browse-local entry point
+        └── commands/        # start, act, navigate, observe, etc.
 ```
 
-The workspace is a pnpm monorepo (`packages/core`, `packages/cli`). The public surface is:
-
-- `@browserbase/local` — the `Browser` class and friends (`packages/core/src/index.ts`)
-- `@browserbase/local-cli` — the `browse-local` binary
-
-When adding a new method to `Browser`:
-
-1. Implement it in `packages/core/src/server.ts` (delegating to `SessionManager`)
-2. Add the underlying behavior in `packages/core/src/sessionManager.ts`
-3. Add or update a test in `packages/core/src/sessionManager.test.ts`
-4. Update [docs/tools.md](docs/tools.md)
-
 ---
 
-## License
+## Docs & examples
 
-MIT
+- [docs/tools.md](docs/tools.md) — Browser class reference
+- [docs/contexts.md](docs/contexts.md) — context management guide
+- [docs/architecture.md](docs/architecture.md) — system design
+- [examples/basic-usage.ts](examples/basic-usage.ts) — full lifecycle demo
+- [examples/autonomous-agent.ts](examples/autonomous-agent.ts) — agent loop demo
+- [examples/context-management.ts](examples/context-management.ts) — context switching demo
+
+Run an example:
+
+```bash
+export OPENAI_API_KEY=sk-...
+npx tsx examples/basic-usage.ts
+```
