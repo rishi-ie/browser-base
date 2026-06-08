@@ -12,6 +12,7 @@
   "devDependencies": {
     "turbo": "^2.9.0",
     "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "@changesets/cli": "^2.27.0"
   }
 }
