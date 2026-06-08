@@ -65,8 +65,8 @@ browse-local install --agent pi-agent
 Or manually:
 
 ```bash
-# 1. Install the CLI
-npm install -g @browserbase/local-cli
+# 1. Install from GitHub (no npm publish needed)
+npm install github:rishi-ie/browser-base
 
 # 2. Create a default context
 browse-local context create default
@@ -94,7 +94,7 @@ Claude Code reads `CLAUDE.md` in the project root. Add browser-base there:
 
 ```bash
 # 1. Install
-npm install -g @browserbase/local-cli
+npm install github:rishi-ie/browser-base
 
 # 2. Create context
 browse-local context create default
@@ -110,7 +110,7 @@ browse-local install --agent claude-code
 ### Cursor, VS Code, or any agent
 
 ```bash
-npm install -g @browserbase/local-cli
+npm install github:rishi-ie/browser-base
 browse-local install --agent both
 ```
 
@@ -122,7 +122,7 @@ For agents without a dedicated installer, the copy-paste prompt above works univ
 
 ```bash
 # 1. Install the CLI
-npm install -g @browserbase/local-cli
+npm install github:rishi-ie/browser-base
 
 # 2. Create a context (a Chrome user profile directory)
 browse-local context create default
