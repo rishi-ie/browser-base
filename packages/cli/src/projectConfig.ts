@@ -113,9 +113,10 @@ export async function loadProjectConfig(opts: {
   const env = process.env;
 
   const contextDirRaw = merged.contextDir ?? env[ENV_KEYS.contextDir];
+  // Default to ./browser-context (matches browse-local context create default)
   const contextDir = contextDirRaw
     ? path.resolve(cwd, contextDirRaw)
-    : path.join(cwd, '.browser-base', 'contexts');
+    : path.resolve(cwd, './browser-context');
 
   const defaultContext =
     merged.defaultContext ?? env[ENV_KEYS.defaultContext] ?? DEFAULTS.defaultContext;
