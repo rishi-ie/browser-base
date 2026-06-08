@@ -1,31 +1,30 @@
 import { z } from 'zod';
 import { defineTool, ok, err } from './tool.js';
-import { SessionManager } from '../sessionManager.js';
+import type { SessionManager } from '../sessionManager.js';
 
 const ActSchema = z.object({
   action: z.string().describe('Action to perform (e.g., "click the submit button")'),
-  context: z.string().optional().describe('Context name (default: "default")'),
 });
 
-export function createActTool(sessionManager: SessionManager) {
-  return defineTool(
-    'act',
-    'Perform an action in the browser (click, type, etc.)',
-    ActSchema,
-    async (args) => {
-      const contextName = args.context ?? 'default';
-      
-      const session = sessionManager.getSession(contextName);
-      if (!session) {
-        return err(`No session running for context "${contextName}". Use the start tool first.`);
+export function createActTool() {
+  return defineTool({
+    name: 'act',
+    description: 'Perform an action in the browser (click, type, etc.)',
+    schema: ActSchema,
+    handler: async (sessionManager: SessionManager, params: z.infer<typeof ActSchema>) => {
+      if (!sessionManager.isActive()) {
+        return err('No browser session running. Use the start tool first.');
       }
 
       try {
-        const result = await sessionManager.act(contextName, args.action);
+        const result = await sessionManager.act(params.action);
         return ok(result);
       } catch (error) {
-        return err(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
+        const message = error instanceof Error ? error.message : String(error);
+        return err(`Action failed: ${message}`);
       }
-    }
-  );
+    },
+  });
 }
+
+export const actTool = createActTool();

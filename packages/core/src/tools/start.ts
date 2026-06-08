@@ -1,37 +1,47 @@
 import { z } from 'zod';
 import { defineTool, ok, err } from './tool.js';
-import { SessionManager } from '../sessionManager.js';
+import type { SessionManager } from '../sessionManager.js';
+import { getAvailableContexts } from '../config.js';
 
 const StartSchema = z.object({
-  context: z.string().optional().describe('Context name (default: "default")'),
+  context: z.string().optional().describe('Context name to use (default: default)'),
 });
 
-export function createStartTool(sessionManager: SessionManager) {
-  return defineTool(
-    'start',
-    'Start a browser session with the specified context',
-    StartSchema,
-    async (args) => {
-      const contextName = args.context ?? 'default';
-      
-      // Check if already running
-      const existing = sessionManager.getSession(contextName);
-      if (existing) {
-        return ok({ session: contextName, status: 'already_running' });
-      }
+export function createStartTool() {
+  return defineTool({
+    name: 'start',
+    description: 'Start a browser session with the specified context',
+    schema: StartSchema,
+    handler: async (sessionManager: SessionManager, params: z.infer<typeof StartSchema>) => {
+      const contextName = params.context ?? 'default';
 
-      // Check if context exists (strict mode)
-      const contexts = sessionManager.getAvailableContexts();
-      if (!contexts.includes(contextName) && sessionManager['config']['strict']) {
-        return err(`Context "${contextName}" does not exist. Available contexts: ${contexts.join(', ') || 'none'}`);
+      // If session already running, return existing info (idempotent)
+      if (sessionManager.isActive()) {
+        const info = {
+          sessionId: sessionManager.getCurrentContext(),
+          debugUrl: sessionManager.getDebugUrl(),
+          cdpUrl: `ws://localhost:9222`,
+          context: sessionManager.getCurrentContext(),
+        };
+        return ok(info);
       }
 
       try {
-        await sessionManager.createSession(contextName);
-        return ok({ session: contextName, status: 'started' });
+        const sessionInfo = await sessionManager.start(contextName);
+        return ok(sessionInfo);
       } catch (error) {
-        return err(`Failed to start session: ${error instanceof Error ? error.message : String(error)}`);
+        const message = error instanceof Error ? error.message : String(error);
+
+        // Check if it's a context not found error
+        if (message.includes('context')) {
+          const available = sessionManager.getAvailableContexts();
+          return err(`Context '${contextName}' not found. Available contexts: ${available.join(', ') || '(none)'}`);
+        }
+
+        return err(`Failed to start session: ${message}`);
       }
-    }
-  );
+    },
+  });
 }
+
+export const startTool = createStartTool();

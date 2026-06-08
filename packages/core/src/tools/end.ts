@@ -1,27 +1,29 @@
 import { z } from 'zod';
 import { defineTool, ok } from './tool.js';
-import { SessionManager } from '../sessionManager.js';
+import type { SessionManager } from '../sessionManager.js';
 
-const EndSchema = z.object({
-  context: z.string().optional().describe('Context name (default: "default")'),
-});
+const EndSchema = z.object({});
 
-export function createEndTool(sessionManager: SessionManager) {
-  return defineTool(
-    'end',
-    'End a browser session',
-    EndSchema,
-    async (args) => {
-      const contextName = args.context ?? 'default';
-      
-      // Idempotent - no error if not running
-      const existing = sessionManager.getSession(contextName);
-      if (!existing) {
-        return ok({ session: contextName, status: 'not_running' });
+export function createEndTool() {
+  return defineTool({
+    name: 'end',
+    description: 'End the current browser session',
+    schema: EndSchema,
+    handler: async (sessionManager: SessionManager, _params: z.infer<typeof EndSchema>) => {
+      // Idempotent - return success even if no session is running
+      if (!sessionManager.isActive()) {
+        return ok({ success: true, message: 'No session running' });
       }
 
-      await sessionManager.closeSession(contextName);
-      return ok({ session: contextName, status: 'closed' });
-    }
-  );
+      try {
+        await sessionManager.end();
+        return ok({ success: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return ok({ success: false, error: message });
+      }
+    },
+  });
 }
+
+export const endTool = createEndTool();

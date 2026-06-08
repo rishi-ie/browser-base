@@ -1,140 +1,311 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { launch, getChromePath, ChromeInstance } from 'chrome-launcher';
-import { Stagehand } from '@browserbasehq/stagehand';
-import { Config } from './config.js';
+import type { ChildProcess } from 'child_process';
+import type { Logger } from 'pino';
+import { launch, getChromePath, type LaunchedChrome } from 'chrome-launcher';
+import { V3 } from '@browserbasehq/stagehand';
+import type { ResolvedConfig } from './config.js';
+import { contextExists, getAvailableContexts } from './config.js';
+import { createLogger } from './logger.js';
 
-export interface Session {
-  id: string;
-  contextName: string;
-  contextDir: string;
-  stagehand: Stagehand;
-  chrome: ChromeInstance;
+/**
+ * Information about a running session.
+ */
+export interface SessionInfo {
+  sessionId: string;
+  debugUrl: string;
+  cdpUrl: string;
+  context: string;
+}
+
+/**
+ * Result from the act tool.
+ */
+export interface ActResult {
+  success: boolean;
+  message: string;
+  actionDescription: string;
+  actions: Action[];
+  cacheStatus?: 'HIT' | 'MISS';
+}
+
+/**
+ * Action identified by the observe tool.
+ */
+export interface Action {
+  selector: string;
+  description: string;
+  method?: string;
+  arguments?: string[];
 }
 
 export class SessionManager {
-  private sessions: Map<string, Session> = new Map();
-  private config: Config;
+  private stagehand: V3 | null = null;
+  private currentContext: string;
+  private contextDir: string;
+  private browserPath: string | null;
+  private headful: boolean;
+  private model: string;
+  private verbose: 0 | 1 | 2;
+  private browserProcess: ChildProcess | null = null;
+  private chromePort: number;
+  private logger: Logger;
+  private isRunning: boolean = false;
+  private chromeInstance: LaunchedChrome | null = null;
 
-  constructor(config: Config) {
-    this.config = config;
+  constructor(config: ResolvedConfig) {
+    this.currentContext = config.defaultContext;
+    this.contextDir = config.contextDir;
+    this.browserPath = config.browserPath ?? null;
+    this.headful = config.headful;
+    this.model = config.model;
+    this.verbose = config.verbose;
+    this.chromePort = config.chromePort;
+    this.logger = createLogger(config.verbose);
   }
 
-  async createSession(contextName: string = 'default'): Promise<Session> {
-    const existingSession = this.sessions.get(contextName);
-    if (existingSession) {
-      return existingSession;
-    }
+  /**
+   * Start a browser session with the given context.
+   */
+  async start(contextName?: string): Promise<SessionInfo> {
+    const context = contextName ?? this.currentContext;
 
-    const contextDir = this.getContextDir(contextName);
-    
-    if (this.config.strict && !fs.existsSync(contextDir)) {
-      throw new Error(`Context "${contextName}" does not exist at ${contextDir}`);
+    // If already running, return existing session info
+    if (this.isRunning) {
+      return {
+        sessionId: this.currentContext,
+        debugUrl: this.getDebugUrl(),
+        cdpUrl: `ws://localhost:${this.chromePort}`,
+        context: this.currentContext,
+      };
     }
 
     // Ensure context directory exists
-    if (!fs.existsSync(contextDir)) {
-      fs.mkdirSync(contextDir, { recursive: true });
+    const contextPath = path.join(this.contextDir, context);
+    if (!fs.existsSync(contextPath)) {
+      fs.mkdirSync(contextPath, { recursive: true });
     }
 
-    const chromePath = this.config.chromePath ?? getChromePath();
-    
-    const chrome = await launch({
-      headless: this.config.headless,
+    // Find Chrome path
+    const chromePath = this.browserPath ?? getChromePath();
+
+    // Launch Chrome
+    this.logger.info(`Launching Chrome with context: ${context}`);
+
+    this.chromeInstance = await launch({
       chromePath,
-      userDataDir: contextDir,
+      userDataDir: contextPath,
+      port: this.chromePort,
+      chromeFlags: [
+        '--no-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        `--remote-debugging-port=${this.chromePort}`,
+      ],
     });
 
-    const stagehand = new Stagehand({
+    this.browserProcess = this.chromeInstance.process as ChildProcess;
+
+    // Wait for CDP to be ready
+    await this.waitForCdp();
+
+    // Create V3 (Stagehand) with LOCAL environment
+    // Extract just the model name without provider prefix (e.g., "gpt-4.1-mini" from "openai/gpt-4.1-mini")
+    const modelName = this.model.includes('/')
+      ? this.model.split('/')[1]
+      : this.model;
+
+    this.stagehand = new V3({
       env: 'LOCAL',
-      chromeEndpoint: `http://localhost:${chrome.port}`,
+      localBrowserLaunchOptions: {
+        cdpUrl: `ws://localhost:${this.chromePort}`,
+        executablePath: chromePath,
+        userDataDir: contextPath,
+        headless: !this.headful,
+      },
+      model: modelName,
+      verbose: this.verbose,
     });
 
-    await stagehand.init();
+    await this.stagehand.init();
 
-    const session: Session = {
-      id: contextName,
-      contextName,
-      contextDir,
-      stagehand,
-      chrome,
+    this.currentContext = context;
+    this.isRunning = true;
+
+    this.logger.info(`Browser session started for context: ${context}`);
+
+    return {
+      sessionId: context,
+      debugUrl: this.getDebugUrl(),
+      cdpUrl: `ws://localhost:${this.chromePort}`,
+      context,
     };
-
-    this.sessions.set(contextName, session);
-    return session;
   }
 
-  async closeSession(contextName: string = 'default'): Promise<void> {
-    const session = this.sessions.get(contextName);
-    if (!session) {
-      return;
+  /**
+   * Wait for CDP WebSocket to be ready.
+   */
+  private async waitForCdp(maxWaitMs: number = 30000): Promise<void> {
+    const start = Date.now();
+    const checkInterval = 100;
+
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        const response = await fetch(`http://localhost:${this.chromePort}/json/version`);
+        if (response.ok) {
+          return;
+        }
+      } catch {
+        // Not ready yet
+      }
+      await new Promise((resolve) => setTimeout(resolve, checkInterval));
     }
 
-    await session.stagehand.close();
-    await session.chrome.kill();
-    this.sessions.delete(contextName);
+    throw new Error('Timeout waiting for Chrome remote debugging port');
   }
 
-  getSession(contextName: string = 'default'): Session | undefined {
-    return this.sessions.get(contextName);
+  /**
+   * Switch to a different browser context.
+   */
+  async useContext(name: string): Promise<void> {
+    const contextPath = path.join(this.contextDir, name);
+
+    if (!contextExists(this.contextDir, name)) {
+      const available = this.getAvailableContexts();
+      throw new Error(
+        `Context '${name}' not found. Available contexts: ${available.join(', ') || '(none)'}`
+      );
+    }
+
+    // If session is running, close it first
+    if (this.isRunning) {
+      await this.end();
+    }
+
+    // Switch context
+    this.currentContext = name;
   }
 
+  /**
+   * End the current browser session.
+   */
+  async end(): Promise<void> {
+    if (this.stagehand) {
+      try {
+        await this.stagehand.close();
+      } catch (err) {
+        this.logger.warn(`Error closing stagehand: ${err}`);
+      }
+      this.stagehand = null;
+    }
+
+    if (this.chromeInstance) {
+      try {
+        this.chromeInstance.kill();
+      } catch (err) {
+        this.logger.warn(`Error killing Chrome: ${err}`);
+      }
+      this.chromeInstance = null;
+    }
+
+    if (this.browserProcess) {
+      this.browserProcess = null;
+    }
+
+    this.isRunning = false;
+    this.logger.info('Browser session ended');
+  }
+
+  /**
+   * Navigate to a URL.
+   */
+  async navigate(url: string): Promise<void> {
+    if (!this.stagehand) {
+      throw new Error('No browser session running');
+    }
+
+    const ctx = this.stagehand.context;
+    const pages = ctx.pages();
+    if (pages.length === 0) {
+      throw new Error('No pages found in browser context');
+    }
+
+    await pages[0].goto(url);
+    this.logger.debug(`Navigated to: ${url}`);
+  }
+
+  /**
+   * Perform an action in the browser.
+   */
+  async act(action: string): Promise<ActResult> {
+    if (!this.stagehand) {
+      throw new Error('No browser session running');
+    }
+
+    const result = await this.stagehand.act(action);
+    this.logger.debug(`Act result: ${JSON.stringify(result)}`);
+    return result;
+  }
+
+  /**
+   * Observe elements on the current page.
+   */
+  async observe(instruction?: string): Promise<Action[]> {
+    if (!this.stagehand) {
+      throw new Error('No browser session running');
+    }
+
+    const result = instruction
+      ? await this.stagehand.observe(instruction)
+      : await this.stagehand.observe();
+
+    this.logger.debug(`Observe result: ${JSON.stringify(result)}`);
+    return result;
+  }
+
+  /**
+   * Extract structured data from the current page.
+   */
+  async extract(instruction?: string, schema?: unknown): Promise<unknown> {
+    if (!this.stagehand) {
+      throw new Error('No browser session running');
+    }
+
+    const result = instruction
+      ? schema
+        ? await this.stagehand.extract(instruction, schema as any)
+        : await this.stagehand.extract(instruction)
+      : await this.stagehand.extract();
+
+    this.logger.debug(`Extract result: ${JSON.stringify(result)}`);
+    return result;
+  }
+
+  /**
+   * Get list of available contexts.
+   */
   getAvailableContexts(): string[] {
-    if (!fs.existsSync(this.config.browserContextDir)) {
-      return [];
-    }
-
-    return fs.readdirSync(this.config.browserContextDir)
-      .filter((name) => {
-        const fullPath = path.join(this.config.browserContextDir, name);
-        return fs.statSync(fullPath).isDirectory();
-      });
+    return getAvailableContexts(this.contextDir);
   }
 
-  getContextDir(contextName: string): string {
-    return path.join(this.config.browserContextDir, contextName);
+  /**
+   * Get the Chrome DevTools debug URL.
+   */
+  getDebugUrl(): string {
+    return `chrome://inspect#devtools/?ws=localhost:${this.chromePort}`;
   }
 
-  async navigate(contextName: string, url: string): Promise<void> {
-    const session = this.getSession(contextName);
-    if (!session) {
-      throw new Error(`No session found for context "${contextName}"`);
-    }
-
-    const pages = await session.stagehand.context.pages();
-    if (pages.length > 0) {
-      await pages[0].goto(url);
-    }
+  /**
+   * Check if a session is currently running.
+   */
+  isActive(): boolean {
+    return this.isRunning;
   }
 
-  async act(contextName: string, action: string): Promise<{ success: boolean }> {
-    const session = this.getSession(contextName);
-    if (!session) {
-      throw new Error(`No session found for context "${contextName}"`);
-    }
-
-    return session.stagehand.act({ action });
-  }
-
-  async observe(contextName: string, instruction: string): Promise<unknown[]> {
-    const session = this.getSession(contextName);
-    if (!session) {
-      throw new Error(`No session found for context "${contextName}"`);
-    }
-
-    return session.stagehand.observe({ instruction });
-  }
-
-  async extract<T>(
-    contextName: string,
-    instruction: string,
-    schema?: Record<string, unknown>
-  ): Promise<T> {
-    const session = this.getSession(contextName);
-    if (!session) {
-      throw new Error(`No session found for context "${contextName}"`);
-    }
-
-    return session.stagehand.extract<T>({ instruction, schema });
+  /**
+   * Get the current context name.
+   */
+  getCurrentContext(): string {
+    return this.currentContext;
   }
 }
