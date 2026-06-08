@@ -1,29 +1,35 @@
+#!/usr/bin/env tsx
 /**
- * Autonomous Agent Example
- * 
- * This example demonstrates how an AI coding agent would use browser-base
- * to accomplish user tasks autonomously. It shows:
- * - Task receipt and planning
- * - Browser automation to accomplish the task
- * - Context persistence across multiple operations
- * - Error handling and recovery
- * 
- * This is a simulation of how Claude, Cursor, or similar agents would
- * interact with the MCP server to perform real browser tasks.
- * 
- * Run with: npx tsx examples/autonomous-agent.ts
+ * Autonomous agent example for browser-base.
+ *
+ * This example simulates how an AI coding agent (Claude, Cursor, etc.)
+ * drives browser-base to accomplish a multi-step task. It demonstrates
+ * the canonical observe -> act -> extract loop and shows how to keep
+ * session state across many operations without re-authenticating.
+ *
+ * The example runs through three example tasks against public, no-login
+ * pages so it can be exercised end-to-end without any setup beyond
+ * `OPENAI_API_KEY`.
+ *
+ * To run this example:
+ *   1. Make sure a `default` context exists:
+ *        npx browse-local context create default
+ *   2. Set your OpenAI API key:
+ *        export OPENAI_API_KEY=sk-...
+ *   3. Run the example:
+ *        npx tsx examples/autonomous-agent.ts
+ *
+ * In a real deployment the agent would not hardcode tasks — it would
+ * receive them from a user message, decide what to do next after each
+ * observation, and call back into the Browser as needed.
  */
 
-import { SessionManager, resolveConfig } from '@browserbase/local';
+import { Browser, resolveConfig } from '@browserbase/local';
+import type { Action, ActResult } from '@browserbase/local';
 
-const config = resolveConfig({
-  browserContextDir: './browser-context',
-  headless: true, // Set to false to see the browser
-});
-
-// ============================================
+// ---------------------------------------------------------------------------
 // Types
-// ============================================
+// ---------------------------------------------------------------------------
 
 interface Task {
   id: string;
@@ -31,28 +37,39 @@ interface Task {
   context?: string;
 }
 
+interface TaskStep {
+  description: string;
+  ok: boolean;
+}
+
 interface TaskResult {
   taskId: string;
   success: boolean;
-  data?: any;
+  steps: TaskStep[];
+  data?: unknown;
   error?: string;
-  steps: string[];
 }
 
-// ============================================
-// Agent Implementation
-// ============================================
+// ---------------------------------------------------------------------------
+// BrowserAgent
+//
+// Thin wrapper around `Browser` that adds task bookkeeping and the
+// observe/act/extract loop a coding agent typically uses. In a real
+// agent the LLM would be making the planning decisions between calls;
+// here we hardcode them so the example is deterministic.
+// ---------------------------------------------------------------------------
 
 class BrowserAgent {
-  private sessionManager: SessionManager;
-  private currentContext: string = 'default';
+  private browser: Browser;
+  private currentContext: string;
 
-  constructor(sessionManager: SessionManager) {
-    this.sessionManager = sessionManager;
+  constructor(browser: Browser, defaultContext = 'default') {
+    this.browser = browser;
+    this.currentContext = defaultContext;
   }
 
   /**
-   * Main agent loop: receive task, execute, return result
+   * Execute a task end-to-end and return a structured result.
    */
   async executeTask(task: Task): Promise<TaskResult> {
     const result: TaskResult = {
@@ -61,389 +78,198 @@ class BrowserAgent {
       steps: [],
     };
 
-    console.log(`\n[Agent] Received task: ${task.description}`);
-
     try {
-      // Step 1: Ensure browser is running
-      result.steps.push('Starting browser session');
-      const context = task.context || this.currentContext;
-      
-      if (!this.sessionManager.getSession(context)) {
-        await this.sessionManager.createSession(context);
+      // Step 1: Make sure the right context is loaded. We don't restart
+      // the session if the requested context is already active, because
+      // restarting would throw away cookies and any in-progress form
+      // state.
+      const targetContext = task.context ?? this.currentContext;
+      if (!this.browser.isActive()) {
+        await this.browser.start(targetContext);
+        this.currentContext = targetContext;
+        result.steps.push({ description: `Started session (${targetContext})`, ok: true });
+      } else if (this.browser.getCurrentContext() !== targetContext) {
+        await this.browser.useContext(targetContext);
+        this.currentContext = targetContext;
+        result.steps.push({ description: `Switched to context (${targetContext})`, ok: true });
+      } else {
+        result.steps.push({ description: `Reusing context (${targetContext})`, ok: true });
       }
-      result.steps.push(`Browser ready (context: ${context})`);
 
-      // Step 2: Plan the approach based on task
-      const approach = this.planApproach(task.description);
-      result.steps.push(`Planned approach: ${approach.type}`);
-
-      // Step 3: Execute based on approach
-      switch (approach.type) {
-        case 'navigate_and_extract':
-          await this.handleNavigateAndExtract(task, approach, result);
-          break;
-        case 'navigate_and_act':
-          await this.handleNavigateAndAct(task, approach, result);
-          break;
-        case 'observe_and_report':
-          await this.handleObserveAndReport(task, approach, result);
-          break;
-        default:
-          throw new Error(`Unknown approach type: ${approach.type}`);
+      // Step 2: Run the observe/act/extract loop. In a real agent the
+      // LLM picks the next action based on the most recent observation;
+      // we drive a small fixed script so the example is reproducible.
+      const loop = this.planLoop(task.description);
+      for (const step of loop) {
+        await this.runStep(step, result);
       }
 
       result.success = true;
-    } catch (error) {
-      result.error = error instanceof Error ? error.message : String(error);
-      result.steps.push(`Error: ${result.error}`);
+    } catch (err) {
+      result.error = err instanceof Error ? err.message : String(err);
+      result.steps.push({ description: `Error: ${result.error}`, ok: false });
     }
 
     return result;
   }
 
   /**
-   * Plan how to approach the task based on its description
+   * Decompose a task description into a small script of operations.
+   * Real agents would let the LLM produce this; we hardcode for clarity.
    */
-  private planApproach(taskDescription: string): { type: string; details: any } {
-    const lower = taskDescription.toLowerCase();
+  private planLoop(description: string): Array<{
+    kind: 'navigate' | 'observe' | 'act' | 'extract';
+    payload: string;
+  }> {
+    const lower = description.toLowerCase();
 
-    if (lower.includes('extract') || lower.includes('get') || lower.includes('scrape')) {
-      return { type: 'navigate_and_extract', details: {} };
+    // "Go to <url> and <verb> ..."
+    const url = description.match(/https?:\/\/\S+/)?.[0];
+
+    if (url && lower.includes('extract')) {
+      return [
+        { kind: 'navigate', payload: url },
+        { kind: 'observe', payload: 'find the main content area' },
+        { kind: 'extract', payload: description.replace(/^.*?(extract|get|scrape)\s*/i, '$1 ') },
+      ];
     }
 
-    if (lower.includes('click') || lower.includes('submit') || lower.includes('fill')) {
-      return { type: 'navigate_and_act', details: {} };
+    if (url && lower.includes('click')) {
+      return [
+        { kind: 'navigate', payload: url },
+        { kind: 'observe', payload: 'find the element to interact with' },
+        { kind: 'act', payload: description.replace(/^.*?(click|type|fill|select)\s*/i, '$1 ') },
+        { kind: 'extract', payload: 'describe what changed on the page' },
+      ];
     }
 
-    if (lower.includes('find') || lower.includes('list') || lower.includes('check')) {
-      return { type: 'observe_and_report', details: {} };
-    }
-
-    // Default to navigate and extract
-    return { type: 'navigate_and_extract', details: {} };
-  }
-
-  /**
-   * Handle tasks that navigate and extract data
-   */
-  private async handleNavigateAndExtract(
-    task: Task,
-    approach: { type: string; details: any },
-    result: TaskResult
-  ): Promise<void> {
-    // Extract target URL from task
-    const url = this.extractUrl(task.description);
-    
     if (url) {
-      result.steps.push(`Navigating to ${url}`);
-      await this.sessionManager.navigate(this.currentContext, url);
+      return [
+        { kind: 'navigate', payload: url },
+        { kind: 'observe', payload: 'find the main interactive elements' },
+        { kind: 'extract', payload: 'summarize what is on the page' },
+      ];
     }
 
-    // Extract the instruction for what data to get
-    const extractInstruction = this.extractInstruction(
-      task.description,
-      ['extract', 'get', 'scrape', 'find', 'list']
-    );
-
-    result.steps.push(`Extracting: ${extractInstruction}`);
-    const data = await this.sessionManager.extract(
-      this.currentContext,
-      extractInstruction
-    );
-
-    result.data = data;
-    result.steps.push(`Extracted ${Object.keys(data).length} fields`);
+    // No URL — just observe and extract on the current page.
+    return [
+      { kind: 'observe', payload: 'find the main content' },
+      { kind: 'extract', payload: description },
+    ];
   }
 
   /**
-   * Handle tasks that involve interacting with the page
+   * Run a single step of the plan and append it to the result.
    */
-  private async handleNavigateAndAct(
-    task: Task,
-    approach: { type: string; details: any },
-    result: TaskResult
+  private async runStep(
+    step: { kind: 'navigate' | 'observe' | 'act' | 'extract'; payload: string },
+    result: TaskResult,
   ): Promise<void> {
-    // Extract target URL
-    const url = this.extractUrl(task.description);
-    
-    if (url) {
-      result.steps.push(`Navigating to ${url}`);
-      await this.sessionManager.navigate(this.currentContext, url);
+    switch (step.kind) {
+      case 'navigate': {
+        await this.browser.navigate(step.payload);
+        result.steps.push({ description: `Navigated to ${step.payload}`, ok: true });
+        return;
+      }
+      case 'observe': {
+        const elements: Action[] = await this.browser.observe(step.payload);
+        result.steps.push({
+          description: `Observed ${elements.length} elements (${step.payload})`,
+          ok: true,
+        });
+        return;
+      }
+      case 'act': {
+        const r: ActResult = await this.browser.act(step.payload);
+        result.steps.push({
+          description: `Act: ${step.payload} -> ${r.success ? 'ok' : 'failed'}`,
+          ok: r.success,
+        });
+        return;
+      }
+      case 'extract': {
+        const data = await this.browser.extract(step.payload);
+        result.data = data;
+        result.steps.push({
+          description: `Extracted data (${step.payload})`,
+          ok: true,
+        });
+        return;
+      }
     }
-
-    // Extract the action to perform
-    const action = this.extractAction(task.description);
-    
-    result.steps.push(`Performing action: ${action}`);
-    await this.sessionManager.act(this.currentContext, action);
-
-    result.steps.push('Action completed successfully');
   }
 
   /**
-   * Handle tasks that observe and report
-   */
-  private async handleObserveAndReport(
-    task: Task,
-    approach: { type: string; details: any },
-    result: TaskResult
-  ): Promise<void> {
-    // Extract what to observe
-    const observeInstruction = this.extractInstruction(
-      task.description,
-      ['find', 'list', 'check', 'are there']
-    );
-
-    result.steps.push(`Observing: ${observeInstruction}`);
-    const elements = await this.sessionManager.observe(
-      this.currentContext,
-      observeInstruction
-    );
-
-    result.data = { elements };
-    result.steps.push(`Found ${elements.length} elements`);
-  }
-
-  /**
-   * Switch to a different context
-   */
-  async switchContext(contextName: string): Promise<void> {
-    this.currentContext = contextName;
-    // Note: In real usage, you'd call use_context or start with the new context
-    console.log(`[Agent] Switching to context: ${contextName}`);
-  }
-
-  /**
-   * Clean up agent resources
+   * End the underlying browser session. Safe to call multiple times.
    */
   async cleanup(): Promise<void> {
-    console.log('[Agent] Cleaning up...');
-    await this.sessionManager.closeSession(this.currentContext);
-  }
-
-  // ============================================
-  // Helper Methods
-  // ============================================
-
-  private extractUrl(text: string): string | null {
-    // Simple URL extraction
-    const urlPattern = /https?:\/\/[^\s]+/;
-    const match = text.match(urlPattern);
-    return match ? match[0] : null;
-  }
-
-  private extractInstruction(
-    text: string,
-    prefixes: string[]
-  ): string {
-    // Extract the meaningful instruction from task description
-    const lower = text.toLowerCase();
-    
-    for (const prefix of prefixes) {
-      const idx = lower.indexOf(prefix);
-      if (idx !== -1) {
-        return text.substring(idx + prefix.length).trim();
-      }
-    }
-    
-    return text;
-  }
-
-  private extractAction(text: string): string {
-    // Extract action from task description
-    const actionVerbs = ['click', 'type', 'select', 'check', 'submit', 'fill'];
-    
-    const lower = text.toLowerCase();
-    for (const verb of actionVerbs) {
-      if (lower.includes(verb)) {
-        // Return the part of the text containing the action
-        const idx = lower.indexOf(verb);
-        return text.substring(idx).trim();
-      }
-    }
-    
-    return text;
+    await this.browser.end();
   }
 }
 
-// ============================================
-// Example Tasks
-// ============================================
+// ---------------------------------------------------------------------------
+// Example tasks
+// ---------------------------------------------------------------------------
 
 const exampleTasks: Task[] = [
   {
     id: '1',
-    description: 'Navigate to example.com and extract the page title and description',
-    context: 'default',
+    description: 'Go to https://example.com and extract the page title and main heading',
   },
   {
     id: '2',
-    description: 'Go to httpbin.org/html and list all the interactive elements on the page',
-    context: 'default',
+    description: 'Navigate to https://example.com and click the "More information..." link',
   },
   {
     id: '3',
-    description: 'Visit github.com and check if there are any notification elements visible',
-    context: 'github-logged-in',
+    description: 'Visit https://example.com and summarize what is on the page',
   },
 ];
 
-// ============================================
-// Run Agent Demo
-// ============================================
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 async function main() {
-  console.log('=== Autonomous Agent Demo ===\n');
-  console.log('This simulates how an AI coding agent uses browser-base');
-  console.log('to accomplish user tasks autonomously.\n');
+  console.log('=== Autonomous Agent Demo ===');
+  console.log('Simulating how an AI coding agent uses browser-base.\n');
 
-  const sessionManager = new SessionManager(config);
-  const agent = new BrowserAgent(sessionManager);
+  // Configure and create a Browser. The agent reuses this single
+  // instance across all tasks so cookies, logins, and page state
+  // persist between steps (and between tasks, if the contexts match).
+  const config = resolveConfig({
+    contextDir: './browser-context',
+    model: 'openai/gpt-4.1-mini',
+  });
+  const browser = new Browser(config);
+  const agent = new BrowserAgent(browser);
 
-  // Process each example task
   for (const task of exampleTasks) {
-    console.log('─'.repeat(50));
-    
+    console.log('-'.repeat(60));
+    console.log(`Task ${task.id}: ${task.description}`);
+
     const result = await agent.executeTask(task);
-    
-    console.log('\nResult:');
-    console.log(`  Task ID: ${result.taskId}`);
+
     console.log(`  Success: ${result.success}`);
-    
-    if (result.steps.length > 0) {
-      console.log('  Steps:');
-      result.steps.forEach((step) => {
-        console.log(`    - ${step}`);
-      });
+    console.log('  Steps:');
+    for (const step of result.steps) {
+      console.log(`    ${step.ok ? '[ok]' : '[!!]'} ${step.description}`);
     }
-    
-    if (result.data) {
-      console.log('  Data:');
-      console.log(`    ${JSON.stringify(result.data, null, 2).split('\n').join('\n    ')}`);
+    if (result.data !== undefined) {
+      console.log(`  Data: ${JSON.stringify(result.data)}`);
     }
-    
     if (result.error) {
       console.log(`  Error: ${result.error}`);
     }
-    
     console.log('');
   }
 
-  // Clean up
   await agent.cleanup();
-
-  console.log('─'.repeat(50));
-  console.log('\n=== Demo Complete ===');
+  console.log('-'.repeat(60));
+  console.log('Done.');
 }
 
-// ============================================
-// MCP Protocol Flow
-// ============================================
-
-/**
- * Shows the actual MCP protocol flow for an autonomous agent
- */
-async function showMcpFlow() {
-  console.log('\n=== MCP Protocol Flow for Autonomous Agent ===\n');
-
-  console.log(`
-  When an AI coding agent receives a user task, the flow is:
-  
-  1. User sends task to agent:
-     "Go to github.com and list my repositories"
-  
-  2. Agent decides to use browser-base MCP tools:
-  
-     Tool: start
-     {
-       "name": "start",
-       "arguments": { "context": "github-logged-in" }
-     }
-     --> Response: { "session": "github-logged-in", "status": "started" }
-  
-     Tool: navigate
-     {
-       "name": "navigate",
-       "arguments": { "url": "https://github.com" }
-     }
-     --> Response: { "url": "https://github.com", "status": "navigated" }
-  
-     Tool: observe
-     {
-       "name": "observe",
-       "arguments": { "instruction": "find the repository list or links" }
-     }
-     --> Response: { "elements": [...] }
-  
-     Tool: extract
-     {
-       "name": "extract",
-       "arguments": { "instruction": "get all repository names and descriptions" }
-     }
-     --> Response: { "data": { "repositories": [...] } }
-  
-  3. Agent synthesizes results and reports to user:
-     "You have 12 repositories. The main ones are:
-      - browser-base (personal browser automation)
-      - my-project (latest work)"
-  
-  4. Session remains open for next task (context persists)
-  
-  5. Later, agent can use the same session:
-     Tool: navigate
-     {
-       "name": "navigate",
-       "arguments": { "url": "https://github.com/settings/tokens" }
-     }
-     --> Already logged in, no need to authenticate again!
-  `);
-}
-
-// ============================================
-// Context Persistence Example
-// ============================================
-
-/**
- * Shows how context persistence works across multiple sessions
- */
-async function showContextPersistence() {
-  console.log('\n=== Context Persistence Example ===\n');
-
-  console.log(`
-  Session 1 (Day 1):
-  -----------------
-  - Create context "github-work"
-  - Open Chrome with that profile
-  - User logs into GitHub manually
-  - Close Chrome (cookies saved)
-  
-  Session 2 (Day 2):
-  -----------------
-  - Agent calls: start({ context: "github-work" })
-  - Chrome opens with saved cookies
-  - Navigate to github.com
-  - Already logged in! No re-authentication needed.
-  
-  Session 3 (Day 3):
-  -----------------
-  - Same as Session 2
-  - Context persists indefinitely
-  
-  This is the key value of browser-base for coding agents:
-  - Login once
-  - Reuse forever
-  - No per-task authentication overhead
-  `);
-}
-
-// Run the main demo
-main().catch((error) => {
-  console.error('Error:', error);
+main().catch((err) => {
+  console.error('Error:', err);
   process.exit(1);
 });
-
-// Uncomment to see additional flows:
-// showMcpFlow();
-// showContextPersistence();
-
-export { BrowserAgent, main, showMcpFlow, showContextPersistence };
