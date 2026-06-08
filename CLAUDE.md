@@ -17,7 +17,7 @@ Published as:
 
 ```
 # Install (pi agent)
-git clone https://github.com/browserbase/browser-base.git ~/.pi/agent/extensions/browser-base
+git clone https://github.com/rishi-ie/browser-base.git ~/.pi/agent/extensions/browser-base
 
 # Then restart pi
 

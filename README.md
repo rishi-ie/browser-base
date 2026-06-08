@@ -7,7 +7,7 @@ A **pi agent plugin** that gives your LLM a local Chrome with persistent login s
 ## Install
 
 ```bash
-git clone https://github.com/browserbase/browser-base.git ~/.pi/agent/extensions/browser-base
+git clone https://github.com/rishi-ie/browser-base.git ~/.pi/agent/extensions/browser-base
 ```
 
 Restart pi. The `browser` tool is now available to the LLM.
@@ -18,7 +18,7 @@ Restart pi. The `browser` tool is now available to the LLM.
 
 ```
 Install browser-base:
-  git clone https://github.com/browserbase/browser-base.git ~/.pi/agent/extensions/browser-base
+  git clone https://github.com/rishi-ie/browser-base.git ~/.pi/agent/extensions/browser-base
 
 Then restart pi.
 
