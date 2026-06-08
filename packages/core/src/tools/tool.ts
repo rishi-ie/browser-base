@@ -11,11 +11,14 @@ export interface ToolResult {
 
 /**
  * A tool definition with schema, description, and handler.
+ * Tools are simple functions that take a SessionManager and params, and return a ToolResult.
+ * This is the internal abstraction — for programmatic use, just call methods on the Browser class.
  */
 export interface Tool<T = unknown> {
   name: string;
   description: string;
-  schema: z.ZodType;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schema: z.ZodObject<any>;
   handler: (sessionManager: SessionManager, params: T) => Promise<ToolResult>;
 }
 
