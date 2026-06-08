@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from './config.js';
 import { SessionManager, type ActResult, type Action, type SessionInfo } from './sessionManager.js';
 
+
 /**
  * Browser session — the main programmatic interface.
  *
@@ -46,7 +47,7 @@ export class Browser {
    * @param name - Context name. Must already exist on disk.
    * @throws If context doesn't exist.
    */
-  async useContext(name: string): Promise<void> {
+  async useContext(name: string): Promise<SessionInfo> {
     return this.sessionManager.useContext(name);
   }
 
