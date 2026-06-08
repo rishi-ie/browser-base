@@ -1,29 +1,35 @@
 import { Command } from 'commander';
 import * as path from 'path';
-import * as fs from 'fs-extra';
+import * as fs from 'fs/promises';
+import { getAvailableContexts } from '@browserbase/local';
 
 export const contextsCommand = new Command('contexts')
   .description('List available browser contexts')
   .option('--context-dir <path>', 'Path to browser-context directory', './browser-context')
+  .option('--json', 'Output as JSON')
   .action(async (opts) => {
     const contextDir = path.resolve(opts.contextDir);
-    
-    if (!await fs.pathExists(contextDir)) {
-      console.log('No contexts found. Run `browse-local context create <name>` to create one.');
+    const contexts = await getAvailableContexts(contextDir);
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ contexts, contextDir }, null, 2) + '\n');
       return;
     }
-    
-    const entries = await fs.readdir(contextDir);
-    const contexts = entries.filter((name) => !name.startsWith('.'));
-    
+
     if (contexts.length === 0) {
       console.log('No contexts found. Run `browse-local context create <name>` to create one.');
     } else {
       console.log('Available contexts:');
       for (const ctx of contexts) {
         const profilePath = path.join(contextDir, ctx);
-        const stats = await fs.stat(profilePath);
-        console.log(`  - ${ctx} ${stats.isDirectory() ? '(directory)' : ''}`);
+        let isDirectory = false;
+        try {
+          const stats = await fs.stat(profilePath);
+          isDirectory = stats.isDirectory();
+        } catch {
+          // ignore
+        }
+        console.log(`  - ${ctx}${isDirectory ? ' (directory)' : ''}`);
       }
     }
   });
