@@ -1,7 +1,7 @@
 {
   "name": "@browserbase/local-cli",
   "version": "0.1.0",
-  "description": "CLI for browser-base MCP server",
+  "description": "CLI for browser-base",
   "type": "module",
   "bin": {
     "browse-local": "./dist/program.js"
@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "postinstall": "node -e \"require('./dist/program.js').run({ from: 'user' })\" if Windows else true"
+    "prepare": "pnpm build"
   },
   "dependencies": {
     "@browserbase/local": "workspace:*",
