@@ -1,197 +1,194 @@
-# Browser Contexts
+# Browser contexts
 
-A comprehensive guide to browser contexts in browser-base.
+A **context** is the unit of session persistence in `browser-base`. It is a directory on disk that Chrome uses as its `--user-data-dir`, so cookies, local storage, history, and saved logins survive across runs.
 
-## What is a Context?
-
-A **browser context** is a Chrome user profile directory. It stores:
-
-- Cookies and session data
-- Local storage
-- Cache
-- Browsing history
-- Saved logins and passwords
-
-Think of it as a "logged-in browser" that persists across sessions.
-
-## Why Contexts?
-
-Without contexts, every browser session starts fresh. You need to:
-
-1. Open the browser
-2. Navigate to a site
-3. Log in (enter credentials, 2FA, etc.)
-4. Do your task
-5. Close the browser
-6. Next session: repeat
-
-With contexts, you do steps 1-4 once, then all subsequent sessions are already logged in.
-
-## Directory Structure
+## What a context is
 
 ```
 browser-context/
-├── default/           # Default context
-│   ├── Default/
-│   └── Local Storage/
-├── github-logged-in/  # Pre-logged-in GitHub
-│   ├── Default/
-│   └── Local Storage/
-└── work-account/      # Work browser profile
-    ├── Default/
-    └── Local Storage/
+├── default/           # default context
+├── github-main/       # pre-logged-in GitHub
+├── gmail/             # pre-logged-in Gmail
+└── stripe-dashboard/  # pre-logged-in Stripe
 ```
 
-Each context is a complete Chrome profile directory.
+Each entry is a complete Chrome user profile. `browser-base` does not invent a storage format — it just hands the directory to Chrome, so anything Chrome normally persists in a profile is available to your agent.
 
----
+## Why contexts
 
-## Managing Contexts
+Without contexts, every browser session starts logged out. With them, you do the login dance **once** and reuse the session forever:
 
-### Create a Context
+1. Create a context (`browse-local context create github-main`)
+2. Open Chrome against it, log in, close Chrome
+3. From now on, `browser.start('github-main')` opens Chrome already logged in
 
-**Using CLI:**
+This is the entire value proposition. It lets agents do real work on sites that require authentication (GitHub, Gmail, dashboards, internal tools) without re-authing on every run.
+
+## Strict mode
+
+Strict mode is the default and the only mode.
+
+- `browser.start('nonexistent')` throws `Context 'nonexistent' not found. Available contexts: ...`
+- `browser.useContext('nonexistent')` throws the same
+- `browse-local context create` is the only way to make a context exist
+
+The rationale: silent auto-creation leads to confusing "why am I logged out" bugs. If the agent says it needs `github-main` and `github-main` isn't on disk, fail loud and tell the human.
+
+## Creating a context
+
+From the CLI:
 
 ```bash
-browse-local context create github-logged-in
+browse-local context create github-main
+# Created context 'github-main' at /abs/path/browser-context/github-main
 ```
 
-**Programmatically:**
+This creates an empty directory. Chrome will populate it the first time the context starts.
 
-The context is just a directory. You can also create it manually:
+You can also create one by hand:
 
 ```bash
-mkdir -p browser-context/my-context
+mkdir -p browser-context/github-main
 ```
 
-### List Available Contexts
+There is no schema or metadata file — the directory itself is the context.
+
+## Pre-login workflow
+
+The recommended way to load a context with a real session:
+
+### 1. Create the context
 
 ```bash
-browse-local contexts
+browse-local context create github-main
 ```
 
-Output:
-```
-Available contexts:
-  - default
-  - github-logged-in
-  - work-account
-```
+### 2. Open Chrome with that profile
 
-### Delete a Context
+The exact path to Chrome varies by platform:
 
 ```bash
-rm -rf browser-context/my-context
-```
-
----
-
-## Pre-Login Workflow
-
-The recommended workflow for creating a "logged-in" context:
-
-### Step 1: Create the Context Directory
-
-```bash
-browse-local context create github-logged-in
-```
-
-### Step 2: Open Chrome with the Context
-
-Launch Chrome using the context directory as its profile:
-
-**macOS:**
-```bash
+# macOS
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --user-data-dir=$(pwd)/browser-context/github-logged-in
+  --user-data-dir="$(pwd)/browser-context/github-main"
+
+# Linux
+google-chrome --user-data-dir=./browser-context/github-main
+
+# Windows (PowerShell)
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --user-data-dir=".\browser-context\github-main"
 ```
 
-**Linux:**
+Chrome opens with a fresh, isolated profile. Crucially, **do not use your regular Chrome** — the `--user-data-dir` flag is what gives you isolation.
+
+### 3. Log in manually
+
+Navigate to the site, log in with your credentials, complete 2FA / captcha / whatever. Treat this exactly like a normal login. The cookies and tokens go into the context directory.
+
+### 4. Close Chrome completely
+
+Quit Chrome (Cmd+Q on macOS, File → Exit on Linux/Windows) — don't just close the window. The session is now persisted to disk.
+
+### 5. Use it
+
+```typescript
+import { Browser, resolveConfig } from '@browserbase/local';
+
+const browser = new Browser(resolveConfig({ contextDir: './browser-context' }));
+await browser.start('github-main');
+await browser.navigate('https://github.com'); // already logged in
+```
+
+## Listing contexts
+
+CLI:
+
 ```bash
-google-chrome --user-data-dir=./browser-context/github-logged-in
-```
-
-**Windows:**
-```powershell
-& "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir=".\browser-context\github-logged-in"
-```
-
-### Step 3: Log In Manually
-
-1. Chrome opens with a fresh profile
-2. Navigate to the website
-3. Log in with your credentials
-4. Complete any 2FA or captcha challenges
-5. Verify you're logged in (check profile, settings, etc.)
-
-### Step 4: Close Chrome
-
-Close Chrome completely. The session data is now saved in the context directory.
-
-### Step 5: Verify
-
-```bash
-# List contexts
 browse-local contexts
-
-# The context should appear
-# Now agents can use it!
+# Available contexts:
+#   - default
+#   - github-main
+#   - gmail
 ```
 
----
+Programmatic:
 
-## Using Contexts in MCP
-
-### Start with Default Context
-
-```json
-{
-  "name": "start",
-  "arguments": {}
-}
+```typescript
+console.log(browser.getAvailableContexts()); // ['default', 'github-main', 'gmail']
 ```
 
-### Start with Named Context
+The CLI command reads directories under `--context-dir` (default `./browser-context`). Hidden directories and non-directories are filtered out.
 
-```json
-{
-  "name": "start",
-  "arguments": {
-    "context": "github-logged-in"
-  }
-}
+## Switching contexts at runtime
+
+```typescript
+await browser.start('github-main');
+await browser.navigate('https://github.com');
+// ... interact ...
+
+await browser.useContext('gmail');
+// previous Chrome process is gone; new one starts with the gmail profile
+await browser.navigate('https://mail.google.com');
 ```
 
-### Switch Contexts Mid-Session
+`useContext` ends the current session, then starts a new one with the named context. The previous context's cookies / storage are untouched on disk — they remain there for next time.
 
-```json
-{
-  "name": "use_context",
-  "arguments": {
-    "context": "work-account"
-  }
-}
+You cannot have two contexts running at once. Chrome locks its `--user-data-dir` while running, so the only safe way to "switch" is end + start.
+
+## Where context data lives
+
+`browser-base` resolves `contextDir` from `BROWSER_BASE_CONTEXT_DIR` (or the `--context-dir` flag, or `./browser-context` by default). Each context is `<contextDir>/<name>/`.
+
+Typical layout on disk:
+
+```
+browser-context/github-main/
+├── Default/
+│   ├── Cookies                # cookies.sqlite
+│   ├── Login Data             # saved logins
+│   ├── Preferences
+│   └── ...
+├── Local Storage/
+│   └── leveldb/
+├── IndexedDB/
+├── Cache/
+└── ...
 ```
 
-### Specify Context for Individual Operations
+This is just a standard Chrome profile. You can back it up, copy it, version-control it (carefully — it includes secrets), or open it in Chrome to inspect.
 
-```json
-{
-  "name": "navigate",
-  "arguments": {
-    "url": "https://github.com/settings/tokens",
-    "context": "github-logged-in"
-  }
-}
+## Backup & share
+
+A context is just a directory — back it up like any other:
+
+```bash
+# Backup
+tar -czf github-main.tar.gz browser-context/github-main/
+
+# Restore on another machine
+tar -xzf github-main.tar.gz -C browser-context/
 ```
 
----
+Things to know when sharing contexts across machines:
 
-## Context Patterns
+- Some sites fingerprint the browser profile and may prompt for re-auth.
+- Some cookies are bound to a specific IP / machine and will be invalidated on move.
+- 2FA sessions often have a TTL shorter than your backup interval.
 
-### Pattern 1: Per-Site Contexts
+## Deleting a context
 
-Create separate contexts for different sites:
+```bash
+rm -rf browser-context/old-context
+```
+
+There is no `browse-local context delete` — just remove the directory. Strict mode will then refuse to `start` or `useContext` the missing name, which is the desired behavior.
+
+## Common patterns
+
+### Per-site contexts
+
+One context per site or per account:
 
 ```
 browser-context/
@@ -201,233 +198,78 @@ browser-context/
 └── gmail-work/
 ```
 
-**Use case:** Multiple accounts on the same service.
+Use this when you have multiple accounts on the same service and need them isolated.
 
-### Pattern 2: Task-Based Contexts
+### Per-task contexts
 
-Create contexts for different tasks:
-
-```
-browser-context/
-├── research/          # For web research
-├── shopping/          # Price comparisons
-└── social-media/      # Social posting
-```
-
-**Use case:** Separate browsing contexts for different work modes.
-
-### Pattern 3: Environment Contexts
-
-Create contexts for different environments:
+One context per category of work:
 
 ```
 browser-context/
-├── dev-local/         # Local development
-├── staging/           # Staging server testing
+├── research/      # general web research
+├── shopping/      # price comparisons
+└── social/        # social posting
+```
+
+Use this to keep cookies / cache scoped to a workflow.
+
+### Per-environment contexts
+
+One context per environment when testing:
+
+```
+browser-context/
+├── dev-local/
+├── staging/
 └── production-readonly/
 ```
 
-**Use case:** Testing against different environments without mixing cookies.
+Use this to avoid mixing cookies between dev and prod.
 
----
+## Naming rules
 
-## Context Isolation
+Context names are validated in `SessionManager.validateContextName`:
 
-Each context is completely isolated:
+- Must be non-empty
+- Cannot be `.` or `..`
+- Cannot contain `/` or `\`
 
-- **Cookies are separate** - No shared sessions
-- **Local storage is separate** - No data leakage
-- **Cache is separate** - Fresh load each time
-
-This isolation makes contexts ideal for:
-
-- Multi-account management
-- Security testing (no cookie contamination)
-- Clean slate testing
-
----
-
-## Best Practices
-
-### 1. Create Contexts for Frequently Used Sites
-
-Don't recreate login sessions repeatedly:
-
-```bash
-# Create once
-browse-local context create gmail-work
-# ... manually log in ...
-
-# Use forever
-# Agent can now access gmail-work without re-auth
-```
-
-### 2. Use Descriptive Names
-
-```
-# Good
-github-work
-stripe-dashboard
-slack-teamname
-
-# Bad
-test
-context1
-temp
-```
-
-### 3. Backup Important Contexts
-
-```bash
-# Backup
-cp -r browser-context/github-work browser-context/github-work.backup
-
-# Restore
-cp -r browser-context/github-work.backup browser-context/github-work
-```
-
-### 4. Clean Up Unused Contexts
-
-```bash
-# List
-browse-local contexts
-
-# Remove old ones
-rm -rf browser-context/old-project
-```
-
-### 5. Handle Context Conflicts
-
-If a site detects you're in a different browser profile:
-
-1. Open Chrome manually with the context
-2. Check for "suspicious login" emails
-3. Verify the session is still valid
-4. If expired, re-authenticate
-
----
-
-## Strict Mode
-
-By default, browser-base runs in **strict mode** - contexts must exist before use.
-
-### Disable Strict Mode
-
-```bash
-# Environment variable
-BROWSER_BASE_STRICT=0 browse-local start
-
-# Or in Claude Desktop config
-{
-  "mcpServers": {
-    "browser-base": {
-      "env": {
-        "BROWSER_BASE_STRICT": "0"
-      }
-    }
-  }
-}
-```
-
-### Strict Mode Behavior
-
-| Action | Strict Mode | Non-Strict Mode |
-|--------|-------------|-----------------|
-| Start with non-existent context | Error | Creates context |
-| Use non-existent context | Error | Creates context |
-| Create context automatically | No | Yes |
-
-### When to Disable Strict Mode
-
-- Development/testing environments
-- When agents should auto-create contexts
-- When context directories are created externally
-
----
-
-## Sharing Contexts
-
-### Share Between Machines
-
-Contexts can be copied to other machines:
-
-```bash
-# On machine A
-tar -czf github-work.tar.gz browser-context/github-work/
-
-# Transfer file to machine B
-# On machine B
-tar -xzf github-work.tar.gz -C browser-context/
-```
-
-### Caveats
-
-- Some sites detect browser profile fingerprints
-- IP address changes may trigger re-authentication
-- Some cookies have machine-specific bindings
-
----
-
-## Contexts vs Incognito
-
-| Feature | Context | Incognito |
-|---------|---------|-----------|
-| Persistence | Yes (until deleted) | No (cleared on close) |
-| Multiple instances | No (profile locked) | Yes (separate windows) |
-| Bookmarks | Preserved | Not preserved |
-| Downloads | Preserved | Preserved |
-| Extensions | Preserved | Limited |
-
-Contexts are for **persistent** needs; Incognito is for **temporary** isolation.
-
----
+This is a security check to prevent path traversal. Stick to `[a-z0-9-_]`.
 
 ## Troubleshooting
 
-### Context Locked
+### "Context 'x' not found"
 
-Chrome locks the profile directory while running:
+`browse-local context create x` first.
 
-```bash
-# Error: "Profile already in use"
-# Solution: Close all Chrome instances using this context
+### "Profile is already in use"
 
-# Check for running Chrome
-ps aux | grep Chrome
-# Kill any Chrome processes
-pkill -f Chrome
-```
+Another Chrome process has the same context open. Close it (`pkill -f chrome` is heavy-handed but works), then retry.
 
-### Context Corrupted
+### Logged out for no apparent reason
 
-If a context becomes corrupted:
+A few possibilities:
 
-```bash
-# Delete the context
-rm -rf browser-context/my-context
+- The site's session cookie expired. Open Chrome against the context dir, re-auth, close.
+- The context directory was deleted or moved.
+- A different Chrome instance grabbed the profile. Check `ps aux | grep -i chrome`.
 
-# Recreate (manually log in again)
-browse-local context create my-context
-# ... log in manually ...
-```
+### Cookies reset every run
 
-### Context Not Found
+Make sure you are not running two `Browser` instances against the same `contextDir` simultaneously. The last one to launch will clobber.
+
+### Need a fresh session for one task
+
+Create a throwaway context:
 
 ```bash
-# List available contexts
-browse-local contexts
-
-# Check the directory exists
-ls -la browser-context/
-
-# Create if missing
-browse-local context create my-context
+browse-local context create temp-test
 ```
 
----
+Use it, then `rm -rf browser-context/temp-test` when done.
 
-## Next Steps
+## Next steps
 
-- [Tools Reference](tools.md) - All 7 MCP tools
-- [Installation Guide](install.md) - Set up for your agent
-- [Examples](../examples/) - Runnable code examples
+- [docs/tools.md](tools.md) — `Browser` class reference, including `useContext` and `start`
+- [docs/install.md](install.md) — full install / setup guide
+- [docs/architecture.md](architecture.md) — how contexts fit into the system
