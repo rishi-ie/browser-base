@@ -4,6 +4,7 @@
   "description": "Simple browser control plugin for coding agents. Auto-creates contexts, login detection, deterministic operations.",
   "type": "module",
   "scripts": {
+    "prepare": "npm run build",
     "build": "cd packages/core && tsc",
     "dev": "cd packages/core && tsc --watch",
     "test": "cd packages/core && vitest run"
