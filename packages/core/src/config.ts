@@ -2,100 +2,87 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 /**
- * Configuration for the browser-base MCP server.
+ * Configuration for browser-base.
  */
-export type Config = {
-  /** Run Chrome in headful mode (default: false) */
+export interface Config {
+  /** Run Chrome in headful mode (visible window). Default: true - user needs to see browser to sign in */
   headful?: boolean;
-  /** Path to Chrome binary (auto-detect if absent) */
+  /** Path to Chrome binary. Auto-detected if not provided. */
   browserPath?: string;
-  /** Path to browser-context directory (default: ./browser-context) */
+  /** Directory for browser contexts (profiles). Default: ./browser-context */
   contextDir?: string;
-  /** Remote debugging port (default: 9222) */
+  /** Chrome remote debugging port. Default: 9222 */
   chromePort?: number;
-  /** If set, use HTTP transport on this port */
-  port?: number;
-  /** HTTP host (default: localhost) */
-  host?: string;
-  /** Model to use (e.g., "openai/gpt-4.1-mini") */
-  model?: string;
-  /** Logging verbosity (default: 0) */
+  /** Enable verbose logging. 0=silent, 1=info, 2=debug. Default: 0 */
   verbose?: 0 | 1 | 2;
-  /** Context name to use by default */
+  /** Default context name. Default: default */
   defaultContext?: string;
-};
+  /** Timeout for browser operations in ms. Default: 30000 */
+  timeout?: number;
+}
 
 /**
- * Resolved configuration with all values filled in.
+ * Resolved configuration with all defaults applied.
  */
 export interface ResolvedConfig {
   headful: boolean;
   browserPath: string | null;
   contextDir: string;
   chromePort: number;
-  port: number | undefined;
-  host: string;
-  model: string;
   verbose: 0 | 1 | 2;
   defaultContext: string;
+  timeout: number;
 }
 
-const DEFAULTS: Omit<ResolvedConfig, 'port'> = {
-  headful: false,
+const DEFAULTS: ResolvedConfig = {
+  headful: true,  // Default to headful - user needs to see browser to sign in
   browserPath: null,
   contextDir: './browser-context',
   chromePort: 9222,
-  host: 'localhost',
-  model: 'openai/gpt-4.1-mini',
   verbose: 0,
   defaultContext: 'default',
+  timeout: 30000,
 };
 
 /**
- * Resolve config from CLI flags (options) and environment variables.
- * Priority: CLI flags > env vars > defaults
+ * Parse a number from string, with fallback.
  */
-export function resolveConfig(options: Partial<Config> = {}): ResolvedConfig {
-  const envPort = process.env['BROWSER_BASE_PORT'];
-  const envChromePort = process.env['BROWSER_BASE_CHROME_PORT'];
-  const envVerbose = process.env['BROWSER_BASE_VERBOSE'];
-  const envHost = process.env['BROWSER_BASE_HOST'];
+function parseIntOr(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * Resolve config from options and environment variables.
+ * Priority: options > env vars > defaults
+ */
+export function resolveConfig(options: Config = {}): ResolvedConfig {
+  const env = process.env;
 
   return {
-    headful: options.headful ?? process.env['BROWSER_BASE_HEADFUL'] === '1',
-    browserPath: options.browserPath ?? (process.env['BROWSER_BASE_BROWSER_PATH'] ?? DEFAULTS.browserPath),
-    contextDir: options.contextDir ?? (process.env['BROWSER_BASE_CONTEXT_DIR'] ?? DEFAULTS.contextDir),
-    chromePort: options.chromePort ?? (envChromePort ? parseInt(envChromePort, 10) : DEFAULTS.chromePort),
-    port: options.port ?? (envPort ? parseInt(envPort, 10) : undefined),
-    host: options.host ?? (envHost ?? DEFAULTS.host),
-    model: options.model ?? (process.env['BROWSER_BASE_MODEL'] ?? DEFAULTS.model),
-    verbose: options.verbose ?? (envVerbose ? (parseInt(envVerbose, 10) as 0 | 1 | 2) : DEFAULTS.verbose),
-    defaultContext: options.defaultContext ?? (process.env['BROWSER_BASE_DEFAULT_CONTEXT'] ?? DEFAULTS.defaultContext),
+    headful: options.headful ?? env['BROWSER_BASE_HEADFUL'] !== '0',
+    browserPath: options.browserPath ?? (env['BROWSER_BASE_BROWSER_PATH'] ?? DEFAULTS.browserPath),
+    contextDir: options.contextDir ?? (env['BROWSER_BASE_CONTEXT_DIR'] ?? DEFAULTS.contextDir),
+    chromePort: options.chromePort ?? parseIntOr(env['BROWSER_BASE_CHROME_PORT'], DEFAULTS.chromePort),
+    verbose: options.verbose ?? (parseIntOr(env['BROWSER_BASE_VERBOSE'], DEFAULTS.verbose) as 0 | 1 | 2),
+    defaultContext: options.defaultContext ?? (env['BROWSER_BASE_DEFAULT_CONTEXT'] ?? DEFAULTS.defaultContext),
+    timeout: options.timeout ?? parseIntOr(env['BROWSER_BASE_TIMEOUT'], DEFAULTS.timeout),
   };
 }
 
 /**
- * Validate config and ensure required directories exist.
+ * Validate a context name to prevent path traversal.
  */
-export function validateConfig(config: ResolvedConfig): void {
-  // Ensure context directory exists
-  if (!fs.existsSync(config.contextDir)) {
-    fs.mkdirSync(config.contextDir, { recursive: true });
+export function validateContextName(name: string): void {
+  if (!name || name.trim() === '') {
+    throw new Error('Context name cannot be empty');
   }
-
-  // Validate port range (with NaN check)
-  if (config.port !== undefined && (!Number.isFinite(config.port) || config.port < 1 || config.port > 65535)) {
-    throw new Error(`Port must be an integer between 1 and 65535, got ${config.port}`);
+  if (name.includes('/') || name.includes('\\')) {
+    throw new Error(`Context name cannot contain path separators: ${name}`);
   }
-
-  // Validate chromePort range
-  if (!Number.isFinite(config.chromePort) || config.chromePort < 1 || config.chromePort > 65535) {
-    throw new Error(`Chrome port must be an integer between 1 and 65535, got ${config.chromePort}`);
-  }
-
-  // Validate verbose range (with NaN check)
-  if (!Number.isFinite(config.verbose) || config.verbose < 0 || config.verbose > 2) {
-    throw new Error(`Verbose must be 0, 1, or 2, got ${config.verbose}`);
+  if (name === '..' || name === '.') {
+    throw new Error(`Invalid context name: ${name}`);
   }
 }
 
@@ -109,7 +96,6 @@ export function getAvailableContexts(contextDir: string): string[] {
 
   return fs.readdirSync(contextDir)
     .filter((name) => {
-      // Skip hidden directories and non-directories
       if (name.startsWith('.')) return false;
       const fullPath = path.join(contextDir, name);
       return fs.statSync(fullPath).isDirectory();
@@ -122,4 +108,55 @@ export function getAvailableContexts(contextDir: string): string[] {
 export function contextExists(contextDir: string, name: string): boolean {
   const contextPath = path.join(contextDir, name);
   return fs.existsSync(contextPath) && fs.statSync(contextPath).isDirectory();
+}
+
+/**
+ * Create a new context directory. Idempotent - returns path if exists.
+ */
+export function createContext(contextDir: string, name: string): string {
+  validateContextName(name);
+  const contextPath = path.join(contextDir, name);
+  
+  if (!fs.existsSync(contextPath)) {
+    fs.mkdirSync(contextPath, { recursive: true });
+  }
+  
+  return contextPath;
+}
+
+/**
+ * Ensure a context exists, creating it if necessary. Idempotent.
+ */
+export function ensureContext(contextDir: string, name: string): string {
+  return createContext(contextDir, name);
+}
+
+/**
+ * Delete a context directory.
+ */
+export function deleteContext(contextDir: string, name: string): void {
+  validateContextName(name);
+  const contextPath = path.join(contextDir, name);
+  
+  if (!fs.existsSync(contextPath)) {
+    throw new Error(`Context '${name}' does not exist`);
+  }
+
+  fs.rmSync(contextPath, { recursive: true, force: true });
+}
+
+/**
+ * Extract domain from URL for context naming.
+ * "https://twitter.com/home" -> "twitter"
+ * "https://www.instagram.com" -> "instagram"
+ */
+export function extractDomainFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.replace(/^www\./, '');
+    // Get first part of domain (e.g., "twitter" from "twitter.com")
+    return hostname.split('.')[0];
+  } catch {
+    return 'default';
+  }
 }

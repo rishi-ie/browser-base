@@ -1,33 +1,45 @@
-// Main exports — programmatic API
-export { Browser, createBrowser } from './server.js';
-export type { ActResult, Action, SessionInfo } from './sessionManager.js';
-export { SessionManager } from './sessionManager.js';
+import { resolveConfig } from './config.js';
+import { Browser } from './browser.js';
 
-// Tools for agent integration (pi, Claude Code, etc.)
-export {
-  createBrowserTool,
-  browserAction,
-  createNavigateTool,
-  createActTool,
-  createObserveTool,
-  createExtractTool,
-  navigate,
-  act,
-  observe,
-  extract,
-} from './tools/index.js';
+// Core exports
+export { Browser, createBrowser, type SessionInfo, type BrowserStatus } from './browser.js';
 export type {
-  ToolContext,
-  ToolResult,
-  ToolUpdate,
-  ToolContent,
-} from './tools/index.js';
+  ElementInfo,
+  ClickResult,
+  TypeResult,
+  ExtractResult,
+  NavigateOptions,
+  ClickOptions,
+  TypeOptions,
+  WaitForOptions,
+} from './browser.js';
 
-// Config
-export { resolveConfig, validateConfig, getAvailableContexts, contextExists } from './config.js';
-export type { Config, ResolvedConfig } from './config.js';
+// Config exports
+export {
+  resolveConfig,
+  validateContextName,
+  getAvailableContexts,
+  contextExists,
+  createContext,
+  ensureContext,
+  deleteContext,
+  extractDomainFromUrl,
+  type Config,
+  type ResolvedConfig,
+} from './config.js';
 
-// Logger
-export { createLogger, createChildLogger } from './logger.js';
-export type { LogLevel } from './logger.js';
+// Auth exports
+export {
+  isContextLoggedIn,
+  checkLocalStorageAuth,
+  checkDomLoginState,
+  checkLoginStatus,
+} from './auth.js';
 
+// Logger exports
+export { createLogger, createChildLogger, type Logger, type LogLevel } from './logger.js';
+
+// Default instance factory
+export function createDefaultBrowser(): Browser {
+  return new Browser(resolveConfig({ headful: true }));
+}

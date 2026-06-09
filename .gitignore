@@ -1,9 +1,6 @@
-node_modules/
-dist/
-.env
+node_modules
+dist
+browser-context
 *.log
 .DS_Store
-.turbo/
-*.tsbuildinfo
-browser-context/
-.browser-base/
+pi-extension.d.ts

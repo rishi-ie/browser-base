@@ -1,27 +1,42 @@
 /**
- * Type declarations for pi-extension.ts
- * 
- * This file provides TypeScript types for the pi agent extension.
- * The actual implementation is in pi-extension.ts (run via jiti by pi).
- * 
- * Usage with pi agent:
- * 1. Copy pi-extension.ts to ~/.pi/agent/extensions/
- * 2. Or reference via: import type { BrowserBaseExtension } from '@browserbase/local/pi-extension'
+ * browser-base pi agent extension
+ *
+ * One-command install: pi install browserbase/browser-base
+ *
+ * This extension provides a unified `browser` tool for pi agents to control
+ * a local Chrome with persistent login sessions.
+ *
+ * Features:
+ * - Natural language browser automation (click, type, navigate)
+ * - Persistent login sessions via Chrome profile directories
+ * - Multiple contexts for different accounts/sites
+ * - Full TypeScript type support
+ *
+ * Usage:
+ * After installing, the agent can use:
+ *   browser navigate to https://github.com
+ *   browser click the sign in button
+ *   browser observe find the search box
+ *   browser extract get all product prices
+ *
+ * Configuration:
+ *   BROWSER_BASE_HEADFUL=1        # show Chrome window
+ *   BROWSER_BASE_CONTEXT_DIR      # default: ./browser-context
+ *   BROWSER_BASE_DEFAULT_CONTEXT  # default: default
+ *   BROWSER_BASE_BROWSER_PATH     # path to Chrome binary
+ *
+ * The extension uses the LLM already configured in pi. No separate API key needed.
  */
-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
 /**
- * browser-base pi extension factory function.
- * 
- * This extension registers:
- * - `browser` tool: Unified tool for all browser actions
- * - `/browser-contexts` command: List available contexts
- * - `/browser-create-context` command: Create new context (via CLI)
- * 
- * @param pi - The pi extension API
+ * Pi extension factory.
+ *
+ * Install: Add to ~/.pi/agent/extensions/browser-base.ts
+ * Or: pi install @browserbase/local (when published to npm)
  */
-declare const browserBaseExtension: (pi: ExtensionAPI) => Promise<void>;
-
-export default browserBaseExtension;
+export default function browserBaseExtension(pi: ExtensionAPI): Promise<void>;
+/**
+ * Type definition for extension API (for reference).
+ * The actual types come from @earendil-works/pi-coding-agent.
+ */
 export type BrowserBaseExtension = typeof browserBaseExtension;

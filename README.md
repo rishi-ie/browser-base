@@ -1,95 +1,148 @@
 # browser-base
 
-A **pi agent plugin** that gives your LLM a local Chrome with persistent login sessions. Clone it, restart pi, done.
+**Simple browser control plugin for coding agents.**
+
+---
+
+## What it does
+
+1. User asks agent to do something on Twitter/Instagram
+2. Agent uses browser plugin
+3. Plugin opens Chrome (visible), auto-creates context from URL domain
+4. If not logged in → Chrome window is visible, user signs in manually
+5. Context is saved automatically
+6. Next time → no re-signing needed
 
 ---
 
 ## Install
 
 ```bash
-git clone https://github.com/rishi-ie/browser-base.git ~/.pi/agent/extensions/browser-base
+# Copy the extension to pi
+cp pi-extension.ts ~/.pi/agent/extensions/browser-base.ts
+
+# Update pi config to load the extension
+# (depends on your pi config format)
+
+# Restart pi
 ```
 
-Restart pi. The `browser` tool is now available to the LLM.
+That's it. No CLI, no setup.
 
 ---
 
-## Give this to your agent
+## How it works
 
+**First time (user needs to sign in):**
 ```
-Install browser-base:
-  git clone https://github.com/rishi-ie/browser-base.git ~/.pi/agent/extensions/browser-base
+User: "Do something on Twitter"
+Agent: browser navigate https://twitter.com
 
-Then restart pi.
+Plugin:
+  - Extracts "twitter" from URL
+  - Auto-creates browser-context/twitter/ directory
+  - Opens Chrome (visible)
+  - Navigates to twitter.com
+  - Detects not logged in
+  - Says: "Chrome is visible - please sign in manually"
 
-Use the browser tool to operate across the internet:
+User: (sees Chrome, signs in manually)
+User: "I'm logged in"
 
-browser navigate to <url>            # open a URL
-browser act "<instruction>"          # click/type using natural language
-browser observe "<description>"      # find clickable elements
-browser extract "<instruction>"      # get structured data (returns JSON)
-browser use-context <name>           # switch to a different context
-browser status                        # show current state
-browser contexts                      # list available contexts
+Agent: browser click .tweet-button
+Agent: browser type [data-testid="tweet"] "Hello world"
+Agent: browser click [data-testid="tweetButton"]
 
-A "context" is a Chrome profile (stores cookies/logins).
-Pre-login once, stay logged in forever.
-
-Create a context:  browse-local context create <name>
-Pre-login:         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --user-data-dir="$(pwd)/browser-context/<name>"
+Done! Context saved automatically.
 ```
 
----
-
-## Example: Research competitor pricing
-
+**Next time:**
 ```
-User: Research pricing for Linear, Notion, and Asana. Summarize in a table.
+User: "Do something on Twitter"
+Agent: browser navigate https://twitter.com
 
-Agent:
-  # Setup (one-time)
-  browse-local context create linear
-  browse-local context create notion
-  browse-local context create asana
-  # User pre-logins each context once
-
-  # Research
-  browser use-context linear
-  browser navigate to https://linear.app/pricing
-  browser extract "get all pricing tiers, prices, and features"
-  # → { plans: [{ name: "Pro", price: 8, ... }] }
-
-  browser use-context notion
-  browser navigate to https://notion.so/pricing
-  browser extract "get all pricing tiers, prices, and features"
-
-  browser use-context asana
-  browser navigate to https://asana.com/pricing
-  browser extract "get all pricing tiers, prices, and features"
-
-  # Synthesize
-  | Product | Free | Pro    | Enterprise |
-  |---------|------|--------|------------|
-  | Linear  | ✓    | $8/mo  | Custom     |
-  | Notion  | ✓    | $8/mo  | $15/mo     |
-  | Asana   | ✓    | $11/mo | Custom     |
+Plugin:
+  - Uses existing browser-context/twitter/
+  - Cookies are there → logged in automatically
+  - User doesn't need to sign in again
 ```
 
 ---
 
-## Setup (one-time)
+## API
 
-```bash
-# Create a context
-browse-local context create default
+| Action | Description |
+|--------|-------------|
+| `navigate(url)` | Open URL, auto-create context from domain |
+| `observe()` | Get all clickable/editable elements |
+| `click(selector)` | Click element |
+| `type(selector, text)` | Type into input |
+| `press(key)` | Press keyboard key |
+| `hover(selector)` | Hover over element |
+| `select(selector, value)` | Select dropdown option |
+| `scroll(direction)` | Scroll page |
+| `waitFor(selector)` | Wait for element |
+| `extract(selector)` | Get text from element |
+| `evaluate(script)` | Run JavaScript |
+| `getUrl()` | Get current URL |
+| `getTitle()` | Get page title |
+| `screenshot()` | Take screenshot |
+| `has(selector)` | Check if element exists |
+| `status` | Get browser state |
+| `end` | Close browser |
 
-# Pre-login (do this once, then forget it)
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --user-data-dir="$(pwd)/browser-context/default"
-# log in, close Chrome
+---
 
-# Done. Agent stays logged in forever.
+## Example conversation
+
 ```
+You: navigate to twitter.com
+Agent: Opening Twitter... (Chrome window will appear)
+  ⚠️ Login required: No auth cookies detected. 
+  Chrome is visible - please sign in manually, then tell me when done.
+
+You: I'm logged in
+
+You: post a tweet saying hello world
+Agent: Let me see what's on the page...
+  Found 47 interactive elements:
+  [1] div [data-testid="tweetTextarea"] "What's happening?" clickable, editable
+  [2] button [data-testid="tweetButtonInline"] "Post" clickable
+  
+Agent: Typing...
+Agent: Clicking Post...
+
+Done!
+```
+
+---
+
+## Contexts
+
+Contexts are just Chrome profile directories:
+```
+browser-context/
+├── twitter/
+│   └── (Chrome profile data)
+├── instagram/
+│   └── (Chrome profile data)
+├── github/
+│   └── (Chrome profile data)
+```
+
+They're created automatically from the URL domain. No manual setup needed.
+
+---
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BROWSER_BASE_CONTEXT_DIR` | `./browser-context` | Where contexts are stored |
+| `BROWSER_BASE_CHROME_PORT` | `9222` | CDP port |
+| `BROWSER_BASE_BROWSER_PATH` | auto | Path to Chrome |
+
+Default is headful=true (Chrome visible) so you can sign in when needed.
 
 ---
 
@@ -98,27 +151,3 @@ browse-local context create default
 - Node.js 22+
 - Chrome or Chromium
 - pi agent
-
----
-
-## Architecture
-
-```
-pi agent (LLM)
-    │
-    └── browser tool
-            │
-            └── browser-base (pi extension)
-                    │
-                    ├── Browser class
-                    │       │
-                    │       └── SessionManager
-                    │               │
-                    │               ├── Stagehand V3 (env: LOCAL)
-                    │               │       └── LLM interprets page + actions
-                    │               │
-                    │               └── Chrome via CDP
-                    │
-                    └── Chrome profiles (contexts)
-                            └── cookies, logins, localStorage
-```

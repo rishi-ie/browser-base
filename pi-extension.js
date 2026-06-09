@@ -2,7 +2,7 @@
 /**
  * browser-base pi agent extension
  *
- * One-command install: pi install @browserbase/local
+ * One-command install: pi install browserbase/browser-base
  *
  * This extension provides a unified `browser` tool for pi agents to control
  * a local Chrome with persistent login sessions.
@@ -20,12 +20,13 @@
  *   browser observe find the search box
  *   browser extract get all product prices
  *
- * Environment variables:
- *   OPENAI_API_KEY - required for act/observe/extract
- *   BROWSER_BASE_CONTEXT_DIR - default: ./browser-context
- *   BROWSER_BASE_DEFAULT_CONTEXT - default: default
- *   BROWSER_BASE_HEADFUL=1 - show Chrome window
- *   BROWSER_BASE_MODEL - LLM model (default: openai/gpt-4.1-mini)
+ * Configuration:
+ *   BROWSER_BASE_HEADFUL=1        # show Chrome window
+ *   BROWSER_BASE_CONTEXT_DIR      # default: ./browser-context
+ *   BROWSER_BASE_DEFAULT_CONTEXT  # default: default
+ *   BROWSER_BASE_BROWSER_PATH     # path to Chrome binary
+ *
+ * The extension uses the LLM already configured in pi. No separate API key needed.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.default = browserBaseExtension;
@@ -216,7 +217,6 @@ async function browserBaseExtension(pi) {
                                         currentContext: browser.getCurrentContext(),
                                         availableContexts: browser.getAvailableContexts(),
                                         debugUrl: browser.getDebugUrl(),
-                                        cdpUrl: browser.getCdpUrl(),
                                     }, null, 2),
                                 }],
                             details: {
