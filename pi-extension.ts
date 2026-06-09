@@ -22,7 +22,7 @@ import {
   createContext,
   extractDomainFromUrl,
   checkLoginStatus,
-} from "@browserbase/local";
+} from "./packages/core/dist/index.js";
 
 /**
  * Singleton browser instance.
